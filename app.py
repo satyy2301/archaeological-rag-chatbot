@@ -5,6 +5,7 @@ Enhanced UI with visualization and archaeology-specific tools.
 
 import os
 from pathlib import Path
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
@@ -12,6 +13,11 @@ import streamlit as st
 from pdf_processor import PDFProcessor
 from rag_chain import ArchaeologicalRAGChain
 from vector_store import VectorStoreManager
+from photo_organizer import PhotoOrganizer
+from artifact_assessment import ArtifactAssessment
+from user_manager import UserManager, StreamlitSessionManager
+from report_generator import ReportGenerator
+from PIL import Image
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -95,6 +101,16 @@ def initialize_session_state():
         st.session_state.timeline_df = None
     if 'sites_list' not in st.session_state:
         st.session_state.sites_list = None
+    if 'photo_organizer' not in st.session_state:
+        st.session_state.photo_organizer = None
+    if 'artifact_assessor' not in st.session_state:
+        st.session_state.artifact_assessor = None
+    if 'user_manager' not in st.session_state:
+        st.session_state.user_manager = UserManager()
+    if 'session_manager' not in st.session_state:
+        st.session_state.session_manager = StreamlitSessionManager(st.session_state.user_manager)
+    if 'show_registration' not in st.session_state:
+        st.session_state.show_registration = False
 
 
 def process_pdf_and_create_vector_store(pdf_path: str):
@@ -207,43 +223,26 @@ def load_existing_vector_store():
 
 def _build_mode_preface(mode: str) -> str:
     """Short instruction that biases the LLM towards a specialized archaeological task."""
+    # Simplified modes: merged from 11 into 4 user-friendly categories
     mapping = {
         "General Q&A": "",
-        "Artifact identification": (
-            "You are helping identify archaeological artifacts from textual descriptions. "
-            "Ask for material, form, decoration, context, and stratigraphic information when needed. "
+        "Field Work & Analysis": (
+            "You are assisting with field work tasks including artifact identification, dating assistance, "
+            "stratigraphy analysis, site classification, and terminology explanations. "
+            "Provide practical, field-ready guidance based on archaeological best practices. "
         ),
-        "Dating assistance": (
-            "You are assisting with dating archaeological materials and contexts. "
-            "Discuss relative and absolute dating methods, their limitations, and confidence levels. "
+        "Documentation & Reporting": (
+            "You are helping with documentation tasks including report generation, methodology templates, "
+            "citation formatting, and creating structured documentation. Focus on professional standards and clarity. "
         ),
-        "Stratigraphy analysis": (
-            "You are interpreting stratigraphic sequences. Focus on superposition, interfaces, "
-            "cuts, fills, and formation processes. "
+        "Legal & Compliance": (
+            "You are guiding about permits, heritage laws, legal compliance, and ethical guidelines. "
+            "Always remind users to check the latest local regulations and consult authorities. "
+            "Emphasize community engagement and long-term conservation. "
         ),
-        "Site preservation": (
-            "You are advising on conservation and site preservation. Consider physical, chemical, "
-            "and human threats and recommend minimally invasive strategies. "
-        ),
-        "Site classification": (
-            "You are classifying archaeological sites based on descriptions, function, period, and setting. "
-        ),
-        "Permit & legal compliance": (
-            "You are guiding the user about permits, heritage laws, and legal compliance. "
-            "Always remind them to check the latest local regulations and consult authorities. "
-        ),
-        "Reporting & methodology templates": (
-            "You are helping draft structured templates for survey methodologies and compliance reports. "
-        ),
-        "Ethical guidelines": (
-            "You are explaining ethical guidelines in archaeology, with emphasis on local communities "
-            "and long-term conservation. "
-        ),
-        "Citation help": (
-            "You are generating properly formatted citations and bibliographic entries from the provided information. "
-        ),
-        "Terminology help": (
-            "You are explaining archaeological terminology in clear, concise language for students and practitioners. "
+        "Site Management": (
+            "You are advising on site preservation, conservation strategies, risk assessment, and site management. "
+            "Consider physical, chemical, and human threats and recommend minimally invasive strategies. "
         ),
     }
     return mapping.get(mode, "")
@@ -252,6 +251,78 @@ def _build_mode_preface(mode: str) -> str:
 def _render_sidebar():
     """Sidebar: document setup + quick tools."""
     with st.sidebar:
+        # User Authentication Section
+        st.header("🔐 Account")
+        
+        session_manager = st.session_state.session_manager
+        user_manager = st.session_state.user_manager
+        current_user = session_manager.get_current_user(st.session_state)
+        
+        if current_user:
+            # User is logged in
+            st.success(f"👤 {current_user['name']}")
+            st.caption(f"Role: {current_user['role']}")
+            if st.button("🚪 Logout", use_container_width=True):
+                session_manager.logout(st.session_state)
+                st.rerun()
+        else:
+            # User is not logged in
+            if not st.session_state.show_registration:
+                # Login form
+                st.subheader("Login")
+                login_email = st.text_input("Email", key="login_email")
+                login_password = st.text_input("Password", type="password", key="login_password")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🔑 Login", use_container_width=True):
+                        if login_email and login_password:
+                            result = session_manager.login(st.session_state, login_email, login_password)
+                            if result['success']:
+                                st.success(result['message'])
+                                st.rerun()
+                            else:
+                                st.error(result['message'])
+                        else:
+                            st.warning("Please enter email and password")
+                
+                with col2:
+                    if st.button("📝 Register", use_container_width=True):
+                        st.session_state.show_registration = True
+                        st.rerun()
+            else:
+                # Registration form
+                st.subheader("Register")
+                reg_name = st.text_input("Name", key="reg_name")
+                reg_email = st.text_input("Email", key="reg_email")
+                reg_password = st.text_input("Password", type="password", key="reg_password")
+                reg_role = st.selectbox(
+                    "Role",
+                    options=['public', 'student', 'professional'],
+                    format_func=lambda x: user_manager.USER_ROLES.get(x, x),
+                    key="reg_role"
+                )
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("✅ Create Account", use_container_width=True):
+                        if reg_name and reg_email and reg_password:
+                            result = user_manager.register_user(reg_email, reg_password, reg_role, reg_name)
+                            if result['success']:
+                                st.success(result['message'])
+                                st.session_state.show_registration = False
+                                st.rerun()
+                            else:
+                                st.error(result['message'])
+                        else:
+                            st.warning("Please fill all fields")
+                
+                with col2:
+                    if st.button("← Back to Login", use_container_width=True):
+                        st.session_state.show_registration = False
+                        st.rerun()
+        
+        st.markdown("---")
         st.header("📚 Document Setup")
         
         # Check if vector store exists
@@ -309,19 +380,13 @@ def _render_sidebar():
             "What are you working on?",
             [
                 "General Q&A",
-                "Artifact identification",
-                "Dating assistance",
-                "Stratigraphy analysis",
-                "Site preservation",
-                "Site classification",
-                "Permit & legal compliance",
-                "Reporting & methodology templates",
-                "Ethical guidelines",
-                "Citation help",
-                "Terminology help",
+                "Field Work & Analysis",
+                "Documentation & Reporting",
+                "Legal & Compliance",
+                "Site Management",
             ],
             index=0,
-            help="This gently steers the assistant towards the kind of help you need.",
+            help="Choose a category to focus the assistant's expertise on your task.",
         )
         st.session_state.active_mode = mode
 
@@ -332,12 +397,10 @@ def _render_sidebar():
         st.markdown("---")
         st.subheader("Quick Starter Questions")
         examples = {
-            "Artifact identification": "Describe this artifact and suggest possible identifications:",
-            "Dating assistance": "Given this context, what dating methods would be appropriate?",
-            "Stratigraphy analysis": "Help me interpret this stratigraphic sequence:",
-            "Site preservation": "What preservation strategy would you recommend for this site?",
-            "Permit & legal compliance": "What permits might be required for a survey in this region?",
-            "Reporting & methodology templates": "Generate a survey methodology template for a walkover survey.",
+            "Field Work": "Help me identify this artifact and determine appropriate dating methods:",
+            "Documentation": "Generate a survey methodology template for a walkover survey:",
+            "Legal & Compliance": "What permits might be required for a survey in this region?",
+            "Site Management": "What preservation strategy would you recommend for this site?",
         }
         for label, prompt in examples.items():
             if st.button(label, key=f"q_{label}"):
@@ -725,6 +788,61 @@ def _render_compliance_tools_tab():
                 st.markdown(result["answer"])
 
     st.markdown("---")
+    st.subheader("📝 Report Generator")
+    
+    # Initialize report generator
+    if 'report_generator' not in st.session_state:
+        st.session_state.report_generator = ReportGenerator(
+            rag_chain=st.session_state.rag_chain if st.session_state.vector_store_initialized else None
+        )
+    else:
+        # Update RAG chain if available
+        if st.session_state.vector_store_initialized:
+            st.session_state.report_generator.rag_chain = st.session_state.rag_chain
+    
+    report_type = st.selectbox(
+        "Report Type",
+        options=list(ReportGenerator.REPORT_TYPES.keys()),
+        format_func=lambda x: ReportGenerator.REPORT_TYPES[x],
+        key="report_type_select"
+    )
+    
+    # Collect project data (simplified - in production would load from data manager)
+    project_data = {
+        'project_name': st.text_input("Project Name", value="Archaeological Investigation", key="report_project_name"),
+        'location': st.text_input("Location", key="report_location"),
+        'sites': st.session_state.sites_list or [],
+        'artifacts': [],  # Would load from data manager
+        'methodology': {},
+    }
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📄 Generate Report", use_container_width=True, key="generate_report_btn"):
+            with st.spinner("Generating report..."):
+                report_content = st.session_state.report_generator.generate_report(
+                    report_type, project_data
+                )
+                st.session_state.generated_report = report_content
+                st.session_state.report_type_generated = report_type
+    
+    with col2:
+        if st.button("💾 Export Report", use_container_width=True, key="export_report_btn", disabled='generated_report' not in st.session_state):
+            if 'generated_report' in st.session_state:
+                report_filename = f"{report_type}_report_{datetime.now().strftime('%Y%m%d')}.md"
+                st.download_button(
+                    "Download Report",
+                    data=st.session_state.generated_report,
+                    file_name=report_filename,
+                    mime="text/markdown",
+                    key="download_report_btn"
+                )
+    
+    if 'generated_report' in st.session_state:
+        st.markdown("### Generated Report Preview")
+        st.markdown(st.session_state.generated_report)
+    
+    st.markdown("---")
     st.subheader("📚 Citation Generator")
     citation_info = st.text_area(
         "Enter bibliographic details (author, year, title, publisher, etc.)",
@@ -750,15 +868,280 @@ def _render_compliance_tools_tab():
                 st.markdown(result["answer"])
 
 
+def _render_photo_organizer_tab():
+    """Dig Photo Organizer - auto-organize photos by trench/locus, artifact types, etc."""
+    st.subheader("📸 Dig Photo Organizer")
+    st.caption(
+        "Upload or select a directory of dig photos to automatically organize them by trench, locus, "
+        "artifact type, stratigraphy, and date. Generate field reports and find duplicates."
+    )
+    
+    # Directory input or file upload
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### Option 1: Scan Directory")
+        photo_dir = st.text_input(
+            "Enter photo directory path:",
+            placeholder="C:/path/to/photos or ./photos",
+            help="Enter the full path to a directory containing photos"
+        )
+        if st.button("Scan Directory", use_container_width=True) and photo_dir:
+            try:
+                organizer = PhotoOrganizer(photo_dir)
+                photos = organizer.scan_directory()
+                st.session_state.photo_organizer = organizer
+                st.success(f"Found {len(photos)} photos!")
+            except Exception as e:
+                st.error(f"Error scanning directory: {e}")
+    
+    with col2:
+        st.markdown("### Option 2: Upload Photos")
+        uploaded_files = st.file_uploader(
+            "Upload photos",
+            type=['jpg', 'jpeg', 'png', 'tiff', 'tif'],
+            accept_multiple_files=True,
+            help="Upload multiple photos to organize"
+        )
+        if uploaded_files:
+            # Create temporary directory and save files
+            temp_dir = Path("./temp_photos")
+            temp_dir.mkdir(exist_ok=True)
+            for uploaded_file in uploaded_files:
+                with open(temp_dir / uploaded_file.name, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+            try:
+                organizer = PhotoOrganizer(str(temp_dir))
+                photos = organizer.scan_directory()
+                st.session_state.photo_organizer = organizer
+                st.success(f"Processed {len(photos)} photos!")
+            except Exception as e:
+                st.error(f"Error processing photos: {e}")
+    
+    # Display organization options
+    if st.session_state.photo_organizer and st.session_state.photo_organizer.photos:
+        organizer = st.session_state.photo_organizer
+        
+        st.markdown("---")
+        st.markdown("### Organize Photos")
+        
+        org_method = st.radio(
+            "Organize by:",
+            ["Trench", "Locus", "Artifact Type", "Stratigraphy Layer", "Date"],
+            horizontal=True
+        )
+        
+        if org_method == "Trench":
+            organized = organizer.organize_by_trench()
+        elif org_method == "Locus":
+            organized = organizer.organize_by_locus()
+        elif org_method == "Artifact Type":
+            organized = organizer.organize_by_artifact_type()
+        elif org_method == "Stratigraphy Layer":
+            organized = organizer.organize_by_stratigraphy()
+        else:  # Date
+            organized = organizer.organize_by_date()
+        
+        # Display organized photos
+        for category, photos in sorted(organized.items()):
+            with st.expander(f"{org_method}: {category} ({len(photos)} photos)"):
+                cols = st.columns(min(4, len(photos)))
+                for idx, photo in enumerate(photos[:12]):  # Show first 12
+                    with cols[idx % 4]:
+                        try:
+                            img = Image.open(photo['file_path'])
+                            st.image(img, use_container_width=True, caption=photo['file_name'])
+                        except:
+                            st.text(photo['file_name'])
+        
+        st.markdown("---")
+        st.markdown("### Reports & Analysis")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("📊 Generate Field Report", use_container_width=True):
+                report = organizer.generate_field_report()
+                st.text_area("Field Report", report, height=400)
+                st.download_button(
+                    "Download Report",
+                    data=report,
+                    file_name="field_report.md",
+                    mime="text/markdown"
+                )
+        
+        with col2:
+            if st.button("🔍 Find Duplicates", use_container_width=True):
+                duplicates = organizer.find_duplicates()
+                if duplicates:
+                    st.warning(f"Found {len(duplicates)} potential duplicate groups")
+                    for idx, group in enumerate(duplicates[:5]):  # Show first 5 groups
+                        with st.expander(f"Duplicate Group {idx + 1}"):
+                            for photo in group:
+                                st.text(f"- {photo['file_name']} ({photo.get('file_size', 0)} bytes)")
+                else:
+                    st.success("No duplicates found!")
+        
+        # Statistics
+        with st.expander("📈 Statistics"):
+            stats = organizer.get_statistics()
+            st.json(stats)
+
+
+def _render_found_something_tab():
+    """Found Something? - Artifact assessment with photo upload and text description."""
+    st.subheader("🔍 Found Something?")
+    st.caption(
+        "Upload a photo or describe what you found. Get expert assessment, identification help, "
+        "and recommendations for next steps."
+    )
+    
+    # Initialize artifact assessor if not exists
+    if st.session_state.artifact_assessor is None:
+        st.session_state.artifact_assessor = ArtifactAssessment(
+            rag_chain=st.session_state.rag_chain if st.session_state.vector_store_initialized else None
+        )
+    
+    assessor = st.session_state.artifact_assessor
+    
+    # Update RAG chain if available
+    if st.session_state.vector_store_initialized and st.session_state.rag_chain:
+        assessor.rag_chain = st.session_state.rag_chain
+    
+    input_method = st.radio(
+        "How would you like to submit your find?",
+        ["📷 Photo Upload", "✍️ Text Description"],
+        horizontal=True
+    )
+    
+    st.markdown("---")
+    
+    if input_method == "📷 Photo Upload":
+        st.markdown("### Option A: Upload Photo")
+        uploaded_image = st.file_uploader(
+            "Upload photo of artifact",
+            type=['jpg', 'jpeg', 'png', 'tiff', 'tif'],
+            help="Upload a clear photo of what you found"
+        )
+        
+        if uploaded_image:
+            image = Image.open(uploaded_image)
+            st.image(image, caption="Uploaded Image", width=400)
+            
+            # Optional context
+            with st.expander("Add Context (Optional)"):
+                context = {
+                    'material': st.selectbox("Material", ['unknown', 'stone', 'metal', 'pottery', 'bone', 'glass', 'organic']),
+                    'size': st.selectbox("Size", ['unknown', 'coin-sized', 'hand-sized', 'larger', 'very large']),
+                    'location': st.selectbox("Location found", ['unknown', 'garden', 'construction site', 'beach', 'field', 'archaeological site', 'other']),
+                    'markings': st.text_area("Markings or decorations", ""),
+                }
+                context = {k: v for k, v in context.items() if v and v != 'unknown'}
+            
+            if st.button("🔍 Assess Artifact", use_container_width=True):
+                with st.spinner("Analyzing artifact..."):
+                    assessment = assessor.assess_from_photo(image, context if 'context' in locals() else None)
+                    
+                    st.markdown("### Assessment Results")
+                    
+                    # Basic analysis
+                    st.markdown("#### Image Analysis")
+                    st.json(assessment['analysis'])
+                    
+                    # Detailed assessment
+                    if assessment.get('detailed_analysis'):
+                        st.markdown("#### Detailed Assessment")
+                        st.markdown(assessment['detailed_analysis'])
+                        
+                        if assessment.get('sources'):
+                            with st.expander("📖 View Sources"):
+                                for source in assessment['sources'][:3]:
+                                    st.text(source.get('content', '')[:500])
+                    
+                    # Recommendations
+                    st.markdown("#### Recommendations")
+                    for rec in assessment.get('recommendations', []):
+                        st.markdown(f"- {rec}")
+    
+    else:  # Text Description
+        st.markdown("### Option B: Text Description")
+        st.caption("Answer the guided questions to describe what you found")
+        
+        template = assessor.get_guided_questions_template()
+        description = {}
+        
+        # Material
+        description['material'] = st.selectbox(
+            template['material']['question'],
+            template['material']['options'],
+            key="desc_material"
+        )
+        
+        # Size
+        description['size'] = st.selectbox(
+            template['size']['question'],
+            template['size']['options'],
+            key="desc_size"
+        )
+        
+        # Location
+        description['location'] = st.selectbox(
+            template['location']['question'],
+            template['location']['options'],
+            key="desc_location"
+        )
+        
+        # Markings (optional)
+        description['markings'] = st.text_area(
+            template['markings']['question'],
+            key="desc_markings",
+            help="Describe any markings, inscriptions, or decorative elements"
+        )
+        
+        # Additional notes (optional)
+        description['additional_notes'] = st.text_area(
+            template['additional_notes']['question'],
+            key="desc_notes",
+            height=100
+        )
+        
+        if st.button("🔍 Assess Artifact", use_container_width=True):
+            with st.spinner("Analyzing artifact description..."):
+                assessment = assessor.assess_from_text(description, st.session_state.rag_chain if st.session_state.vector_store_initialized else None)
+                
+                st.markdown("### Assessment Results")
+                
+                # Description summary
+                st.markdown("#### Your Description")
+                st.markdown(assessment['analysis'].get('full_description', ''))
+                
+                # Detailed assessment
+                if assessment.get('detailed_analysis'):
+                    st.markdown("#### Detailed Assessment")
+                    st.markdown(assessment['detailed_analysis'])
+                    
+                    if assessment.get('sources'):
+                        with st.expander("📖 View Sources"):
+                            for source in assessment['sources'][:3]:
+                                st.text(source.get('content', '')[:500])
+                
+                # Recommendations
+                st.markdown("#### Recommendations")
+                for rec in assessment.get('recommendations', []):
+                    st.markdown(f"- {rec}")
+
+
 def main():
     """Main application entry point."""
     initialize_session_state()
 
     _render_sidebar()
 
-    chat_tab, viz_tab, docs_tab, compliance_tab = st.tabs(
+    chat_tab, found_tab, photo_tab, viz_tab, docs_tab, compliance_tab = st.tabs(
         [
             "💬 Chat & Analysis",
+            "🔍 Found Something?",
+            "📸 Photo Organizer",
             "📊 Maps & Timelines",
             "📄 Docs & Glossary",
             "⚖️ Compliance & Templates",
@@ -767,6 +1150,12 @@ def main():
 
     with chat_tab:
         _render_chat_tab()
+    
+    with found_tab:
+        _render_found_something_tab()
+    
+    with photo_tab:
+        _render_photo_organizer_tab()
 
     with viz_tab:
         _render_visualisations_tab()

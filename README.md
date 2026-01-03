@@ -10,9 +10,13 @@ A Retrieval-Augmented Generation (RAG) chatbot designed to help users with archa
 - 🧠 **RAG Architecture**: Combines retrieval and generation for accurate, context-aware answers
 - 📚 **Source Citation**: Shows source documents for transparency
 
-## 📸 Screenshots:
-![Interface](Screenshot 2025-12-31 204640.png)
-![Interface2](Screenshot 2025-12-31 204659.png)
+## 📸 Screenshots
+
+### Chat Interface
+![Chat Interface](images/Screenshot%202025-12-31%20204640.png)
+
+### Map & Timeline View  
+![Map View](images/Screenshot%202025-12-31%20204659.png)
 ## Installation
 
 1. **Navigate to the project directory:**
