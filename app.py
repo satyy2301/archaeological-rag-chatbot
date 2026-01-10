@@ -1047,6 +1047,83 @@ def _render_found_something_tab():
                     # Basic analysis
                     st.markdown("#### Image Analysis")
                     st.json(assessment['analysis'])
+
+                    # Enhancement comparison
+                    if assessment.get('visuals'):
+                        st.markdown("#### Image Enhancement Comparison")
+                        cols = st.columns(3)
+                        with cols[0]:
+                            st.caption("CLAHE")
+                            st.image(assessment['visuals']['enh_clahe'], caption="Contrast enhanced")
+                        with cols[1]:
+                            st.caption("Retinex")
+                            st.image(assessment['visuals']['enh_retinex'], caption="Illumination corrected")
+                        with cols[2]:
+                            st.caption("Sharpen")
+                            st.image(assessment['visuals']['enh_sharpen'], caption="Edge-highlighted")
+
+                        # Preprocessing preview
+                        with st.expander("Show preprocessing steps"):
+                            pcols = st.columns(3)
+                            with pcols[0]:
+                                st.caption("Denoised")
+                                st.image(assessment['visuals']['pre_denosed'])
+                            with pcols[1]:
+                                st.caption("Shadow reduced")
+                                st.image(assessment['visuals']['pre_shadow_reduced'])
+                            with pcols[2]:
+                                st.caption("Normalized")
+                                st.image(assessment['visuals']['pre_normalized'])
+
+                    # OCR overlays and interactive zoom
+                    if assessment['analysis'].get('ocr'):
+                        st.markdown("#### Detected Regions & OCR")
+                        st.image(assessment['visuals'].get('boxed', None), caption="Detected regions (numbered)")
+                        ocr_items = assessment['analysis']['ocr']
+                        # Build simple table
+                        import pandas as _pd
+                        table = _pd.DataFrame([
+                            {
+                                'index': i + 1,
+                                'text': item.get('text', ''),
+                                'confidence': round(float(item.get('confidence', 0.0)), 3)
+                            }
+                            for i, item in enumerate(ocr_items)
+                        ])
+                        st.dataframe(table, use_container_width=True)
+
+                        selected_idx = st.number_input("Zoom region index", min_value=1, max_value=len(ocr_items), value=1, step=1)
+                        if selected_idx:
+                            from image_analyzer import crop_box
+                            box = ocr_items[selected_idx - 1]['box']
+                            zoom = crop_box(image, box)
+                            st.image(zoom, caption=f"Zoomed region #{selected_idx}")
+
+                            # Manual correction feedback
+                            correction = st.text_input("Suggest transcription / reading for this region")
+                            if st.button("Save correction", key=f"save_corr_{selected_idx}"):
+                                import json, os
+                                os.makedirs("user_data", exist_ok=True)
+                                corr_path = os.path.join("user_data", "corrections.json")
+                                data = []
+                                if os.path.exists(corr_path):
+                                    try:
+                                        with open(corr_path, "r", encoding="utf-8") as f:
+                                            data = json.load(f)
+                                    except Exception:
+                                        data = []
+                                entry = {
+                                    'timestamp': datetime.now().isoformat(),
+                                    'file_name': uploaded_image.name,
+                                    'region_index': int(selected_idx),
+                                    'box': box,
+                                    'suggestion': correction,
+                                    'context': context if 'context' in locals() else {}
+                                }
+                                data.append(entry)
+                                with open(corr_path, "w", encoding="utf-8") as f:
+                                    json.dump(data, f, ensure_ascii=False, indent=2)
+                                st.success("Correction saved. Thanks for the feedback!")
                     
                     # Detailed assessment
                     if assessment.get('detailed_analysis'):

@@ -9,6 +9,7 @@ A Retrieval-Augmented Generation (RAG) chatbot designed to help users with archa
 - 💬 **Interactive Chat**: Streamlit-based web interface for easy interaction
 - 🧠 **RAG Architecture**: Combines retrieval and generation for accurate, context-aware answers
 - 📚 **Source Citation**: Shows source documents for transparency
+- 🖼️ **Artifact Image Analysis**: Upload photos of inscriptions/coins/manuscripts for non-destructive enhancement (denoise, shadow removal, CLAHE, Retinex, sharpening), OCR with bounding boxes and confidence, region zoom, and feedback-saving for future improvements
 
 ## 📸 Screenshots
 
@@ -83,6 +84,16 @@ A Retrieval-Augmented Generation (RAG) chatbot designed to help users with archa
    - The chatbot will provide answers based on the PDF content
    - View source citations to see where the information came from
 
+   ### Image Analysis (Found Something?)
+   - Open the "Found Something?" tab
+   - Upload a high-resolution photo (JPEG/PNG/TIFF)
+   - Optionally add context (material, size, location, markings)
+   - Click "Assess Artifact" to see:
+      - Side-by-side enhanced images (CLAHE, Retinex, Sharpen)
+      - Preprocessing previews (denoise, shadow reduction, normalization)
+      - Detected regions with OCR text and confidence
+      - Interactive zoom of any numbered region and a field to save your transcription corrections to `user_data/corrections.json`
+
 ## Project Structure
 
 ```
@@ -94,6 +105,7 @@ archaeological-rag-chatbot/
 ├── requirements.txt      # Python dependencies
 ├── .env.example         # Environment variables template
 ├── README.md            # This file
+├── image_analyzer.py     # Image preprocessing, enhancement, OCR, overlays
 └── vector_store/        # Generated vector store (created after processing)
 ```
 

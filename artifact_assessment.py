@@ -21,35 +21,54 @@ class ArtifactAssessment:
         self.rag_chain = rag_chain
         
     def assess_from_photo(self, image: Image.Image, context: Optional[Dict] = None) -> Dict:
-        """Assess artifact from uploaded photo."""
+        """Assess artifact from uploaded photo with CV/AI enhancements and optional RAG."""
+        from image_analyzer import analyze, to_png_bytes  # local import to keep module lightweight
+
         assessment = {
             'input_type': 'photo',
             'image_size': image.size,
             'image_format': image.format,
             'analysis': {},
             'recommendations': [],
+            'visuals': {},
         }
-        
-        # Extract basic image features
-        assessment['analysis']['dimensions'] = image.size
-        assessment['analysis']['color_mode'] = image.mode
-        assessment['analysis']['file_size_estimate'] = len(image.tobytes())
-        
-        # Basic color analysis
-        if image.mode == 'RGB':
-            pixels = list(image.getdata())
-            assessment['analysis']['dominant_colors'] = self._get_dominant_colors(pixels, k=3)
-        
-        # Shape analysis (simplified - could be enhanced with CV)
-        assessment['analysis']['aspect_ratio'] = image.size[0] / image.size[1] if image.size[1] > 0 else 1.0
-        assessment['analysis']['orientation'] = 'landscape' if image.size[0] > image.size[1] else 'portrait' if image.size[1] > image.size[0] else 'square'
-        
-        # Generate assessment text for RAG
+
+        # Core image analysis pipeline
+        try:
+            result = analyze(image)
+            assessment['analysis']['dimensions'] = image.size
+            assessment['analysis']['color_mode'] = image.mode
+            assessment['analysis']['file_size_estimate'] = len(image.tobytes())
+            assessment['analysis']['aspect_ratio'] = image.size[0] / image.size[1] if image.size[1] > 0 else 1.0
+            assessment['analysis']['orientation'] = 'landscape' if image.size[0] > image.size[1] else 'portrait' if image.size[1] > image.size[0] else 'square'
+
+            # Dominant colors (quick estimate)
+            if image.mode == 'RGB':
+                pixels = list(image.getdata())
+                assessment['analysis']['dominant_colors'] = self._get_dominant_colors(pixels, k=3)
+
+            # OCR boxes and coin hints
+            assessment['analysis']['ocr'] = result.get('ocr', [])
+            assessment['analysis']['coin_detection'] = result.get('coin', {})
+
+            # Visuals (PNG bytes for Streamlit display)
+            visuals = {
+                'pre_denosed': to_png_bytes(result['preprocessed'].get('denoised', image)),
+                'pre_shadow_reduced': to_png_bytes(result['preprocessed'].get('shadow_reduced', image)),
+                'pre_normalized': to_png_bytes(result['preprocessed'].get('normalized', image)),
+                'enh_clahe': to_png_bytes(result['enhancements']['clahe']),
+                'enh_retinex': to_png_bytes(result['enhancements']['retinex']),
+                'enh_sharpen': to_png_bytes(result['enhancements']['sharpen']),
+                'boxed': to_png_bytes(result['boxed']),
+            }
+            assessment['visuals'] = visuals
+        except Exception as e:
+            logger.error(f"Image analysis failed: {e}")
+
+        # Optional RAG-based narrative
         if self.rag_chain:
             assessment_text = self._generate_assessment_text(assessment, context)
             assessment['textual_description'] = assessment_text
-            
-            # Use RAG chain for detailed analysis
             prompt = self._build_assessment_prompt(assessment_text, context)
             try:
                 result = self.rag_chain.query(prompt)
@@ -57,13 +76,14 @@ class ArtifactAssessment:
                 assessment['sources'] = result.get('source_documents', [])
             except Exception as e:
                 logger.error(f"Error in RAG assessment: {e}")
-                assessment['detailed_analysis'] = "Analysis available but detailed assessment requires document context."
+                assessment['detailed_analysis'] = "Computer-vision analysis completed. Document-based reasoning unavailable."
         else:
-            assessment['detailed_analysis'] = "Upload a document to enable detailed artifact analysis."
-        
-        # Generate recommendations
+            assessment['detailed_analysis'] = (
+                "Image preprocessing and enhancement completed. Detected regions are highlighted. "
+                "Upload documents to enrich identification, dating, and context.")
+
+        # Recommendations
         assessment['recommendations'] = self._generate_recommendations(assessment, context)
-        
         return assessment
     
     def assess_from_text(self, description: Dict, rag_chain=None) -> Dict:
