@@ -45,7 +45,8 @@ class ArchaeologicalRAGChain:
                  vector_store_manager,
                  model_name: str = "gpt-3.5-turbo",
                  temperature: float = 0.7,
-                 use_openai: bool = True):
+                 use_openai: bool = True,
+                 openai_api_key: Optional[str] = None):
         """
         Initialize RAG chain
         
@@ -59,6 +60,7 @@ class ArchaeologicalRAGChain:
         self.model_name = model_name
         self.temperature = temperature
         self.use_openai = use_openai
+        self.openai_api_key = openai_api_key
         
         # Initialize LLM
         self.llm = self._initialize_llm()
@@ -73,7 +75,7 @@ class ArchaeologicalRAGChain:
     def _initialize_llm(self):
         """Initialize language model"""
         if self.use_openai:
-            api_key = os.getenv("OPENAI_API_KEY")
+            api_key = self.openai_api_key or os.getenv("OPENAI_API_KEY")
             if not api_key:
                 logger.warning("OPENAI_API_KEY not found. Using default model.")
                 # Fallback to a local model or raise error

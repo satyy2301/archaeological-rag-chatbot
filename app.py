@@ -111,6 +111,34 @@ def initialize_session_state():
         st.session_state.session_manager = StreamlitSessionManager(st.session_state.user_manager)
     if 'show_registration' not in st.session_state:
         st.session_state.show_registration = False
+    if 'user_openai_api_key' not in st.session_state:
+        st.session_state.user_openai_api_key = ""
+
+
+def _initialize_rag_chain_with_current_key() -> bool:
+    """Initialize or refresh the RAG chain using a user key (if provided) or .env key."""
+    if not st.session_state.vector_store_manager:
+        st.error("Vector store is not ready yet.")
+        return False
+
+    api_key = st.session_state.get("user_openai_api_key", "").strip() or None
+    try:
+        rag_chain = ArchaeologicalRAGChain(
+            vector_store_manager=st.session_state.vector_store_manager,
+            model_name="gpt-3.5-turbo",
+            temperature=0.7,
+            openai_api_key=api_key,
+        )
+        st.session_state.rag_chain = rag_chain
+        st.success("Assistant initialized and ready to answer questions.")
+        return True
+    except Exception as e:
+        st.session_state.rag_chain = None
+        st.error(f"Error initializing assistant: {str(e)}")
+        st.info(
+            "Add a valid OpenAI API key in the sidebar (or set OPENAI_API_KEY in .env) and try again."
+        )
+        return False
 
 
 def process_pdf_and_create_vector_store(pdf_path: str):
@@ -175,21 +203,10 @@ def process_pdf_and_create_vector_store(pdf_path: str):
                 st.session_state.vector_store_initialized = True
                 st.success("Vector store created successfully!")
             
-            # Initialize RAG chain
-            with st.spinner("Initializing RAG chain..."):
-                try:
-                    rag_chain = ArchaeologicalRAGChain(
-                        vector_store_manager=vector_store_manager,
-                        model_name="gpt-3.5-turbo",
-                        temperature=0.7
-                    )
-                    st.session_state.rag_chain = rag_chain
-                    st.success("RAG system ready!")
-                    return True
-                except Exception as e:
-                    st.error(f"Error initializing RAG chain: {str(e)}")
-                    st.info("Please make sure you have set OPENAI_API_KEY in your .env file")
-                    return False
+            # Initialize RAG chain (best effort so document processing still succeeds)
+            with st.spinner("Initializing assistant..."):
+                _initialize_rag_chain_with_current_key()
+            return True
                     
     except Exception as e:
         st.error(f"Error processing PDF: {str(e)}")
@@ -208,13 +225,8 @@ def load_existing_vector_store():
         st.session_state.vector_store_manager = vector_store_manager
         st.session_state.vector_store_initialized = True
         
-        # Initialize RAG chain
-        rag_chain = ArchaeologicalRAGChain(
-            vector_store_manager=vector_store_manager,
-            model_name="gpt-3.5-turbo",
-            temperature=0.7
-        )
-        st.session_state.rag_chain = rag_chain
+        # Initialize RAG chain (best effort)
+        _initialize_rag_chain_with_current_key()
         return True
     except Exception as e:
         logger.info(f"Could not load existing vector store: {e}")
@@ -323,6 +335,32 @@ def _render_sidebar():
                         st.rerun()
         
         st.markdown("---")
+        st.header("🔑 OpenAI API Key")
+        st.caption(
+            "For public use, each visitor can paste their own key. It is only kept in this browser session."
+        )
+        entered_key = st.text_input(
+            "Your OpenAI API Key",
+            type="password",
+            value=st.session_state.user_openai_api_key,
+            placeholder="sk-...",
+            help="Not stored in files or database. Cleared when session ends or when you click Clear key.",
+        )
+        st.session_state.user_openai_api_key = entered_key
+
+        col_key1, col_key2 = st.columns(2)
+        with col_key1:
+            if st.button("Apply key", use_container_width=True):
+                if st.session_state.vector_store_initialized and st.session_state.vector_store_manager:
+                    _initialize_rag_chain_with_current_key()
+                else:
+                    st.success("Key saved for this session. Process or load a vector store to start chat.")
+        with col_key2:
+            if st.button("Clear key", use_container_width=True):
+                st.session_state.user_openai_api_key = ""
+                st.info("Session key cleared.")
+
+        st.markdown("---")
         st.header("📚 Document Setup")
         
         # Check if vector store exists
@@ -391,7 +429,7 @@ def _render_sidebar():
         st.session_state.active_mode = mode
 
         st.caption(
-            "💡 Tip: Make sure to set your `OPENAI_API_KEY` in a `.env` file for the chatbot to work."
+            "💡 Tip: Public users can paste their own API key above, or you can set OPENAI_API_KEY in .env."
         )
 
         st.markdown("---")

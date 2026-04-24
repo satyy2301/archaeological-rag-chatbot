@@ -9,6 +9,7 @@ A Retrieval-Augmented Generation (RAG) chatbot designed to help users with archa
 - 💬 **Interactive Chat**: Streamlit-based web interface for easy interaction
 - 🧠 **RAG Architecture**: Combines retrieval and generation for accurate, context-aware answers
 - 📚 **Source Citation**: Shows source documents for transparency
+- 🔑 **Bring Your Own OpenAI Key**: Public users can paste their own OpenAI API key in the sidebar (session-only, not persisted)
 - 🖼️ **Artifact Image Analysis**: Upload photos of inscriptions/coins/manuscripts for non-destructive enhancement (denoise, shadow removal, CLAHE, Retinex, sharpening), OCR with bounding boxes and confidence, region zoom, and feedback-saving for future improvements
 
 ## 📸 Screenshots
@@ -83,6 +84,7 @@ A Retrieval-Augmented Generation (RAG) chatbot designed to help users with archa
    - Once processed, you can ask questions about archaeological surveys
    - The chatbot will provide answers based on the PDF content
    - View source citations to see where the information came from
+   - Public users can paste their own OpenAI API key in the sidebar under **OpenAI API Key**
 
    ### Image Analysis (Found Something?)
    - Open the "Found Something?" tab
@@ -137,11 +139,48 @@ You can modify the following in the code:
 - **LLM Model**: Modify `model_name` in `rag_chain.py` (default: "gpt-3.5-turbo")
 - **Temperature**: Adjust `temperature` for more/less creative responses (default: 0.7)
 
+## Public Deployment (Fastest and Easiest)
+
+The smoothest public deployment for this project is **Streamlit Community Cloud**.
+
+### Why this is the quickest option
+- Native support for Streamlit apps
+- Free public URL in minutes
+- No server setup or Docker required
+- Easy redeploy on every GitHub push
+
+### Steps
+1. Push this repository to GitHub.
+2. Go to Streamlit Community Cloud: https://share.streamlit.io
+3. Click **New app** and select this repository/branch.
+4. Set the main file path to `app.py`.
+5. Click **Deploy**.
+
+This repo includes deployment helpers:
+- `packages.txt` for required Linux system libraries used by OpenCV/EasyOCR
+- `.streamlit/secrets.toml.example` for optional fallback secret format
+
+### For Public Users' API Keys
+- The app supports session-level key entry in the sidebar.
+- Each user enters their own key with **Apply key**.
+- The key is not stored in `user_data` files or repository.
+
+### Optional Owner Key Fallback
+If you want the app to also work without user-entered keys, set a default secret in Streamlit Cloud:
+- In app settings > **Secrets**, add:
+
+```toml
+OPENAI_API_KEY = "sk-..."
+```
+
+This acts as a fallback when a visitor does not provide a key.
+
 ## Troubleshooting
 
 ### "OPENAI_API_KEY not found"
-- Make sure you've created a `.env` file with your OpenAI API key
-- Check that the `.env` file is in the same directory as `app.py`
+- For local development, make sure you've created a `.env` file with your OpenAI API key.
+- For public usage, users can paste a key in the sidebar under **OpenAI API Key**.
+- On Streamlit Cloud, you can also set `OPENAI_API_KEY` in app secrets as fallback.
 
 ### PDF Processing Errors
 - Try a different PDF if the current one fails to process
