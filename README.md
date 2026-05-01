@@ -170,6 +170,8 @@ This repo includes deployment helpers:
 - `.streamlit/config.toml` for Streamlit runtime settings
 - `.streamlit/secrets.toml.example` for optional fallback secret format
 
+For Streamlit Community Cloud, keep `packages.txt` minimal. Avoid pinning distro-specific libraries that may not exist on Streamlit's current base image.
+
 ### API Key Entry
 - The app supports session-level key entry in the sidebar.
 - Enter a key with **Apply key**.
@@ -203,6 +205,10 @@ Without this key, the app still uses public sources that do not require authenti
 ### PDF Processing Errors
 - Try a different PDF if the current one fails to process
 - Some PDFs with complex layouts may require manual text extraction
+
+### Streamlit Cloud dependency install errors
+- If the build fails while processing `packages.txt`, remove nonessential or distro-specific apt packages and redeploy
+- This repository intentionally uses a minimal `packages.txt` to stay compatible with Streamlit Community Cloud's Linux image
 
 ### Vector Store Issues
 - Delete the `vector_store/` directory and reprocess the PDF

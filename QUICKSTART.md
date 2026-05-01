@@ -82,6 +82,7 @@ Notes for Community Cloud:
 - Do not commit `vector_store/` or populated `user_data/`
 - The app can start without a prebuilt vector index
 - OpenCV uses the headless package for leaner deploys
+- `packages.txt` intentionally keeps a minimal Linux package list for Streamlit Cloud compatibility
 - If `easyocr` is not installed, hotspot-based manual review still works
 
 ## 📝 Example Questions to Try
@@ -101,6 +102,10 @@ Notes for Community Cloud:
 ### PDF Processing Fails
 - Try uploading the PDF again from the Chat & Analysis page
 - Make sure the PDF is not password-protected or corrupted
+
+### Streamlit Cloud dependency install fails
+- If deployment stops during the apt step, keep `packages.txt` minimal and avoid adding distro-specific packages like `libglib2.0-0`
+- Redeploy after pushing the updated `packages.txt`; Streamlit Cloud will reinstall system packages from scratch
 
 ### Vector Store Not Found
 - Run `python setup.py` to create the vector store
