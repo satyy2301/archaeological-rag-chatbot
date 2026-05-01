@@ -11,6 +11,7 @@ A Retrieval-Augmented Generation (RAG) chatbot designed to help users with archa
 - 📚 **Source Citation**: Shows source documents for transparency
 - 🔑 **Bring Your Own OpenAI Key**: Public users can paste their own OpenAI API key in the sidebar (session-only, not persisted)
 - 🖼️ **Artifact Image Analysis**: Upload photos of inscriptions/coins/manuscripts for non-destructive enhancement (denoise, shadow removal, CLAHE, Retinex, sharpening), OCR with bounding boxes and confidence, region zoom, and feedback-saving for future improvements
+- 🌐 **Similar Finds Lookup**: Searches lightweight public collection APIs for comparable objects without bundling bulky local reference datasets
 
 ## 📸 Screenshots
 
@@ -86,15 +87,23 @@ A Retrieval-Augmented Generation (RAG) chatbot designed to help users with archa
    - View source citations to see where the information came from
    - Public users can paste their own OpenAI API key in the sidebar under **OpenAI API Key**
 
-   ### Image Analysis (Found Something?)
-   - Open the "Found Something?" tab
-   - Upload a high-resolution photo (JPEG/PNG/TIFF)
-   - Optionally add context (material, size, location, markings)
-   - Click "Assess Artifact" to see:
-      - Side-by-side enhanced images (CLAHE, Retinex, Sharpen)
-      - Preprocessing previews (denoise, shadow reduction, normalization)
-      - Detected regions with OCR text and confidence
-      - Interactive zoom of any numbered region and a field to save your transcription corrections to `user_data/corrections.json`
+### Image Analysis (Found Something?)
+- Open the "Found Something?" tab
+- Upload a high-resolution photo (JPEG/PNG/TIFF)
+- Optionally add context (artifact type, material, size, location, markings, script profile)
+- Click "Assess Artifact" to see:
+   - Side-by-side enhanced images (CLAHE, Retinex, Sharpen)
+   - Preprocessing previews (denoise, shadow reduction, normalization)
+   - Detected regions with OCR text, confidence, suggested readings, and backend notes
+   - Similar finds from public collection sources such as The Met and Wikidata, with optional Europeana results if `EUROPEANA_API_KEY` is configured
+   - Interactive zoom of any numbered region and a field to save your transcription corrections to `user_data/corrections.json`
+
+## Deployment Notes
+
+- Do not commit `vector_store/`, uploaded files, or runtime `user_data/` to the repository.
+- On Streamlit Community Cloud, the app defaults to in-memory user/session storage.
+- OCR is lightweight by default. If `easyocr` is not installed, the app falls back to hotspot detection so the review UI still works.
+- Build the FAISS index at runtime from an uploaded PDF, or host a generated index outside the repo if you need a prebuilt corpus.
 
 ## Project Structure
 
@@ -108,7 +117,8 @@ archaeological-rag-chatbot/
 ├── .env.example         # Environment variables template
 ├── README.md            # This file
 ├── image_analyzer.py     # Image preprocessing, enhancement, OCR, overlays
-└── vector_store/        # Generated vector store (created after processing)
+├── artifact_lookup.py    # Lightweight external collection lookup
+└── vector_store/         # Generated locally or at runtime, not committed
 ```
 
 ## How It Works
@@ -158,6 +168,7 @@ The smoothest public deployment for this project is **Streamlit Community Cloud*
 
 This repo includes deployment helpers:
 - `packages.txt` for required Linux system libraries used by OpenCV/EasyOCR
+- `.streamlit/config.toml` for Streamlit runtime settings
 - `.streamlit/secrets.toml.example` for optional fallback secret format
 
 ### For Public Users' API Keys
@@ -174,6 +185,14 @@ OPENAI_API_KEY = "sk-..."
 ```
 
 This acts as a fallback when a visitor does not provide a key.
+
+Optional lookup secret:
+
+```toml
+EUROPEANA_API_KEY = "your-europeana-key"
+```
+
+Without this key, the app still uses public sources that do not require authentication.
 
 ## Troubleshooting
 

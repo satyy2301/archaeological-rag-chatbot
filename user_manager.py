@@ -25,16 +25,36 @@ class UserManager:
         'admin': 'Admin'
     }
     
-    def __init__(self, data_directory: str = "./user_data"):
+    def __init__(self, data_directory: str = "./user_data", persist_to_disk: Optional[bool] = None):
         self.data_directory = Path(data_directory)
         self.users_file = self.data_directory / "users.json"
         self.sessions_file = self.data_directory / "sessions.json"
-        self.data_directory.mkdir(exist_ok=True)
+        self.persist_to_disk = self._resolve_persistence(persist_to_disk)
+        if self.persist_to_disk:
+            self.data_directory.mkdir(exist_ok=True)
         self._load_users()
         self._load_sessions()
+
+    def _resolve_persistence(self, persist_to_disk: Optional[bool]) -> bool:
+        """Determine whether runtime auth data should be written to disk."""
+        if persist_to_disk is not None:
+            return persist_to_disk
+
+        env_value = os.getenv("APP_PERSIST_USER_DATA", "").strip().lower()
+        if env_value in {"1", "true", "yes", "on"}:
+            return True
+        if env_value in {"0", "false", "no", "off"}:
+            return False
+
+        # Safe default for Streamlit/public deployments: keep auth/session state ephemeral.
+        return False
     
     def _load_users(self):
         """Load user data from file."""
+        if not self.persist_to_disk:
+            self.users = {}
+            return
+
         if self.users_file.exists():
             try:
                 with open(self.users_file, 'r', encoding='utf-8') as f:
@@ -48,6 +68,9 @@ class UserManager:
     
     def _save_users(self):
         """Save user data to file."""
+        if not self.persist_to_disk:
+            return
+
         try:
             with open(self.users_file, 'w', encoding='utf-8') as f:
                 json.dump(self.users, f, indent=2, default=str)
@@ -56,6 +79,10 @@ class UserManager:
     
     def _load_sessions(self):
         """Load session data from file."""
+        if not self.persist_to_disk:
+            self.sessions = {}
+            return
+
         if self.sessions_file.exists():
             try:
                 with open(self.sessions_file, 'r', encoding='utf-8') as f:
@@ -69,6 +96,9 @@ class UserManager:
     
     def _save_sessions(self):
         """Save session data to file."""
+        if not self.persist_to_disk:
+            return
+
         try:
             with open(self.sessions_file, 'w', encoding='utf-8') as f:
                 json.dump(self.sessions, f, indent=2, default=str)

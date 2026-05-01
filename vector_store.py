@@ -4,14 +4,13 @@ Creates and manages embeddings and vector database
 """
 
 import os
-import pickle
 from typing import List, Optional, Dict
 try:
     from langchain_community.embeddings import HuggingFaceEmbeddings
-    from langchain_community.vectorstores import FAISS, Chroma
+    from langchain_community.vectorstores import FAISS
 except ImportError:
     from langchain.embeddings import HuggingFaceEmbeddings
-    from langchain.vectorstores import FAISS, Chroma
+    from langchain.vectorstores import FAISS
 
 # Handle LangChain version differences
 try:
@@ -48,12 +47,15 @@ class VectorStoreManager:
         
         Args:
             embedding_model: HuggingFace model name for embeddings
-            vector_store_type: "faiss" or "chroma"
+            vector_store_type: currently only "faiss"
             persist_directory: Directory to persist vector store
         """
         self.embedding_model = embedding_model
-        self.vector_store_type = vector_store_type
+        self.vector_store_type = vector_store_type.lower()
         self.persist_directory = persist_directory or "./vector_store"
+
+        if self.vector_store_type != "faiss":
+            raise ValueError("Only the FAISS vector store is supported in this deployment build.")
         
         # Initialize embeddings
         logger.info(f"Loading embedding model: {embedding_model}")
@@ -94,24 +96,10 @@ class VectorStoreManager:
         logger.info(f"Split into {len(split_docs)} documents")
         
         # Create vector store
-        if self.vector_store_type == "faiss":
-            self.vector_store = FAISS.from_documents(split_docs, self.embeddings)
-            # Save FAISS index
-            os.makedirs(self.persist_directory, exist_ok=True)
-            self.vector_store.save_local(self.persist_directory)
-            logger.info(f"FAISS vector store saved to {self.persist_directory}")
-        
-        elif self.vector_store_type == "chroma":
-            os.makedirs(self.persist_directory, exist_ok=True)
-            self.vector_store = Chroma.from_documents(
-                split_docs,
-                self.embeddings,
-                persist_directory=self.persist_directory
-            )
-            logger.info(f"Chroma vector store saved to {self.persist_directory}")
-        
-        else:
-            raise ValueError(f"Unknown vector store type: {self.vector_store_type}")
+        self.vector_store = FAISS.from_documents(split_docs, self.embeddings)
+        os.makedirs(self.persist_directory, exist_ok=True)
+        self.vector_store.save_local(self.persist_directory)
+        logger.info(f"FAISS vector store saved to {self.persist_directory}")
     
     def load_vector_store(self):
         """Load existing vector store from disk"""
@@ -120,19 +108,11 @@ class VectorStoreManager:
         
         logger.info(f"Loading vector store from {self.persist_directory}")
         
-        if self.vector_store_type == "faiss":
-            self.vector_store = FAISS.load_local(
-                self.persist_directory,
-                self.embeddings,
-                allow_dangerous_deserialization=True
-            )
-        elif self.vector_store_type == "chroma":
-            self.vector_store = Chroma(
-                persist_directory=self.persist_directory,
-                embedding_function=self.embeddings
-            )
-        else:
-            raise ValueError(f"Unknown vector store type: {self.vector_store_type}")
+        self.vector_store = FAISS.load_local(
+            self.persist_directory,
+            self.embeddings,
+            allow_dangerous_deserialization=True
+        )
         
         logger.info("Vector store loaded successfully")
     

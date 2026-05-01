@@ -13,7 +13,7 @@
 - **Purpose**: Manages document embeddings and similarity search
 - **Components**:
   - **Embeddings**: Uses HuggingFace sentence transformers (default: `all-MiniLM-L6-v2`)
-  - **Vector Database**: FAISS or Chroma for fast similarity search
+  - **Vector Database**: FAISS for fast similarity search
   - **Text Splitter**: RecursiveCharacterTextSplitter for intelligent chunking
 - **Features**:
   - Create new vector stores from text chunks
@@ -41,6 +41,15 @@
   - Chat interface with message history
   - Source citation display
   - Vector store management (load/create)
+  - Script-aware artifact image analysis with enhancement, OCR metadata, and manual review hotspots
+  - Lightweight external similar-finds lookup
+
+### 5. Artifact Lookup (`artifact_lookup.py`)
+- **Purpose**: Suggest comparable public collection records without bundling local reference corpora
+- **Sources**:
+  - The Met public collection API
+  - Wikidata search API
+  - Europeana search API when `EUROPEANA_API_KEY` is configured
 
 ## Data Flow
 
@@ -53,7 +62,7 @@ Text Chunks
     ↓
 Vector Store Manager (embed & store)
     ↓
-FAISS/Chroma Vector Database
+FAISS Vector Database
     ↓
 User Question
     ↓
@@ -67,9 +76,10 @@ Answer + Sources
 - **Web Framework**: Streamlit
 - **RAG Framework**: LangChain
 - **Embeddings**: Sentence Transformers (HuggingFace)
-- **Vector Database**: FAISS (CPU) or Chroma
+- **Vector Database**: FAISS (CPU)
 - **LLM**: OpenAI GPT-3.5-turbo
 - **PDF Processing**: pdfplumber, PyPDF2
+- **Artifact Similarity**: public collection APIs
 
 ## Configuration Options
 
@@ -106,9 +116,8 @@ archaeological-rag-chatbot/
 ├── QUICKSTART.md        # Quick start guide
 ├── ARCHITECTURE.md      # This file
 ├── .env.example         # Environment template
-└── vector_store/        # Generated (after setup)
-    ├── index.faiss      # FAISS index
-    └── index.pkl        # Metadata
+├── artifact_lookup.py   # Public collection lookup adapters
+└── vector_store/        # Generated locally or at runtime, not committed
 ```
 
 ## Performance Considerations
@@ -117,6 +126,11 @@ archaeological-rag-chatbot/
 - **Subsequent Runs**: Instant (vector store is cached)
 - **Query Time**: 2-5 seconds (depends on API response time)
 - **Memory**: ~500MB-1GB for typical PDFs
+
+For Streamlit Community Cloud:
+- Keep runtime data out of git
+- Use in-memory session persistence by default
+- Build or fetch vector indexes outside the repository
 
 ## Extensibility
 

@@ -16,6 +16,45 @@ from PIL import Image
 import cv2
 
 
+SCRIPT_PROFILES: Dict[str, Dict[str, object]] = {
+    "auto": {
+        "label": "Auto / mixed",
+        "languages": ["en"],
+        "notes": "Best-effort OCR with generic Latin support and manual review cues.",
+    },
+    "latin": {
+        "label": "Latin / Roman legends",
+        "languages": ["en"],
+        "notes": "Optimized for Romanized legends and worn coin inscriptions.",
+    },
+    "greek": {
+        "label": "Greek",
+        "languages": ["el", "en"],
+        "notes": "Uses modern Greek OCR where available; ancient forms still need manual review.",
+    },
+    "devanagari": {
+        "label": "Devanagari variants",
+        "languages": ["hi", "en"],
+        "notes": "Uses Hindi OCR as a best-effort proxy for Devanagari-derived scripts.",
+    },
+    "brahmi": {
+        "label": "Brahmi / early scripts",
+        "languages": ["en"],
+        "notes": "No bundled specialist model; use enhancement plus hotspot review and manual correction.",
+    },
+    "kharoshthi": {
+        "label": "Kharoshthi",
+        "languages": ["en"],
+        "notes": "No bundled specialist model; use enhancement plus hotspot review and manual correction.",
+    },
+}
+
+
+def get_script_profiles() -> Dict[str, Dict[str, object]]:
+    """Expose script profiles to the UI without importing app modules."""
+    return SCRIPT_PROFILES
+
+
 def pil_to_cv(image: Image.Image) -> np.ndarray:
     """Convert PIL image to OpenCV BGR array."""
     if image.mode in ("RGBA", "P"):
@@ -128,41 +167,77 @@ def hough_coin_detection(image: Image.Image) -> Dict:
     return {"circles": coins}
 
 
-def run_ocr(image: Image.Image, languages: Optional[List[str]] = None) -> List[Dict]:
-    """Run OCR using EasyOCR if available. Returns boxes and texts with confidence.
-    languages defaults to generic Latin/English; for ancient scripts this acts as a helper.
-    """
-    langs = languages or ["en", "latin"]
+def _candidate_readings(text: str, script_profile: str) -> List[str]:
+    """Generate top candidate readings for damaged or noisy OCR output."""
+    base = (text or "").strip()
+    if not base:
+        return ["Unreadable segment", "Damaged inscription", "Manual review needed"]
+
+    normalized = "".join(ch for ch in base.upper() if ch.isalnum() or ch in {"-", "/", " "}).strip()
+    substitutions = normalized.replace("0", "O").replace("1", "I").replace("5", "S")
+    profile_hint = f"{normalized} ({script_profile})" if script_profile not in {"auto", "latin"} else normalized
+
+    ordered = []
+    for candidate in [base, normalized or base, substitutions or normalized, profile_hint]:
+        if candidate and candidate not in ordered:
+            ordered.append(candidate)
+    return ordered[:3]
+
+
+def run_ocr(image: Image.Image, script_profile: str = "auto", languages: Optional[List[str]] = None) -> Dict[str, object]:
+    """Run OCR if available and return regions, backend, and review hints."""
+    profile = SCRIPT_PROFILES.get(script_profile, SCRIPT_PROFILES["auto"])
+    langs = languages or list(profile.get("languages", ["en"]))
     try:
         import easyocr  # type: ignore
         reader = easyocr.Reader(langs, gpu=False)
         arr = np.array(image.convert("RGB"))
         results = reader.readtext(arr)
-        out = []
-        for bbox, text, conf in results:
+        regions = []
+        for index, (bbox, text, conf) in enumerate(results, start=1):
             # bbox: 4 points, convert to rectangle
             xs = [p[0] for p in bbox]
             ys = [p[1] for p in bbox]
             x_min, x_max = int(min(xs)), int(max(xs))
             y_min, y_max = int(min(ys)), int(max(ys))
-            out.append({
+            regions.append({
+                "hotspot_id": index,
                 "box": [x_min, y_min, x_max, y_max],
                 "text": text,
                 "confidence": float(conf),
+                "top_candidates": _candidate_readings(text, script_profile),
             })
-        return out
+        return {
+            "regions": regions,
+            "backend": "easyocr",
+            "script_profile": script_profile,
+            "notes": str(profile.get("notes", "")),
+        }
     except Exception:
         # Fallback: simple edge-based pseudo boxes (no text)
         cv = pil_to_cv(image)
         gray = cv2.cvtColor(cv, cv2.COLOR_BGR2GRAY)
         edges = cv2.Canny(gray, 60, 120)
         contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        out = []
-        for cnt in contours[:25]:  # limit
+        regions = []
+        for index, cnt in enumerate(contours[:25], start=1):  # limit
             x, y, w, h = cv2.boundingRect(cnt)
             if w * h > 300:  # skip tiny
-                out.append({"box": [x, y, x + w, y + h], "text": "", "confidence": 0.0})
-        return out
+                regions.append(
+                    {
+                        "hotspot_id": index,
+                        "box": [x, y, x + w, y + h],
+                        "text": "",
+                        "confidence": 0.0,
+                        "top_candidates": _candidate_readings("", script_profile),
+                    }
+                )
+        return {
+            "regions": regions,
+            "backend": "contour-fallback",
+            "script_profile": script_profile,
+            "notes": "OCR package unavailable or unsupported for this script; showing candidate hotspots for manual reading.",
+        }
 
 
 def draw_boxes(image: Image.Image, boxes: List[Dict]) -> Image.Image:
@@ -188,7 +263,7 @@ def to_png_bytes(img: Image.Image) -> bytes:
     return buf.getvalue()
 
 
-def analyze(image: Image.Image) -> Dict:
+def analyze(image: Image.Image, script_profile: str = "auto") -> Dict:
     """High-level analysis pipeline. Returns dict of outputs.
     - preprocessing variants
     - enhancements: CLAHE, Retinex, Sharpen
@@ -200,8 +275,8 @@ def analyze(image: Image.Image) -> Dict:
     retinex = enhance_retinex(pre.get("normalized", image))
     sharp = enhance_sharpen(pre.get("normalized", image))
 
-    ocr_boxes = run_ocr(retinex)  # OCR on retinex variant typically performs better
-    boxed = draw_boxes(retinex, ocr_boxes)
+    ocr_payload = run_ocr(retinex, script_profile=script_profile)  # OCR on retinex variant typically performs better
+    boxed = draw_boxes(retinex, ocr_payload["regions"])
 
     coin = hough_coin_detection(image)
 
@@ -212,7 +287,7 @@ def analyze(image: Image.Image) -> Dict:
             "retinex": retinex,
             "sharpen": sharp,
         },
-        "ocr": ocr_boxes,
+        "ocr": ocr_payload,
         "boxed": boxed,
         "coin": coin,
     }

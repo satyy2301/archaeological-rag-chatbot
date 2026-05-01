@@ -10,6 +10,8 @@ import base64
 from io import BytesIO
 import logging
 
+from artifact_lookup import ArtifactLookupClient
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -19,10 +21,13 @@ class ArtifactAssessment:
     
     def __init__(self, rag_chain=None):
         self.rag_chain = rag_chain
+        self.lookup_client = ArtifactLookupClient()
         
     def assess_from_photo(self, image: Image.Image, context: Optional[Dict] = None) -> Dict:
         """Assess artifact from uploaded photo with CV/AI enhancements and optional RAG."""
         from image_analyzer import analyze, to_png_bytes  # local import to keep module lightweight
+
+        script_profile = (context or {}).get('script_profile', 'auto')
 
         assessment = {
             'input_type': 'photo',
@@ -35,12 +40,13 @@ class ArtifactAssessment:
 
         # Core image analysis pipeline
         try:
-            result = analyze(image)
+            result = analyze(image, script_profile=script_profile)
             assessment['analysis']['dimensions'] = image.size
             assessment['analysis']['color_mode'] = image.mode
             assessment['analysis']['file_size_estimate'] = len(image.tobytes())
             assessment['analysis']['aspect_ratio'] = image.size[0] / image.size[1] if image.size[1] > 0 else 1.0
             assessment['analysis']['orientation'] = 'landscape' if image.size[0] > image.size[1] else 'portrait' if image.size[1] > image.size[0] else 'square'
+            assessment['analysis']['script_profile'] = script_profile
 
             # Dominant colors (quick estimate)
             if image.mode == 'RGB':
@@ -48,8 +54,12 @@ class ArtifactAssessment:
                 assessment['analysis']['dominant_colors'] = self._get_dominant_colors(pixels, k=3)
 
             # OCR boxes and coin hints
-            assessment['analysis']['ocr'] = result.get('ocr', [])
+            ocr_payload = result.get('ocr', {})
+            assessment['analysis']['ocr'] = ocr_payload.get('regions', [])
+            assessment['analysis']['ocr_backend'] = ocr_payload.get('backend', 'unknown')
+            assessment['analysis']['ocr_notes'] = ocr_payload.get('notes', '')
             assessment['analysis']['coin_detection'] = result.get('coin', {})
+            assessment['analysis']['detected_text'] = self._collect_detected_text(assessment['analysis']['ocr'])
 
             # Visuals (PNG bytes for Streamlit display)
             visuals = {
@@ -62,8 +72,12 @@ class ArtifactAssessment:
                 'boxed': to_png_bytes(result['boxed']),
             }
             assessment['visuals'] = visuals
+
+            lookup_query = self._build_lookup_query(assessment['analysis'], context)
+            assessment['similar_finds'] = self.lookup_client.search_similar_finds(lookup_query, context=context, limit=6)
         except Exception as e:
             logger.error(f"Image analysis failed: {e}")
+            assessment['similar_finds'] = []
 
         # Optional RAG-based narrative
         if self.rag_chain:
@@ -78,13 +92,60 @@ class ArtifactAssessment:
                 logger.error(f"Error in RAG assessment: {e}")
                 assessment['detailed_analysis'] = "Computer-vision analysis completed. Document-based reasoning unavailable."
         else:
-            assessment['detailed_analysis'] = (
-                "Image preprocessing and enhancement completed. Detected regions are highlighted. "
-                "Upload documents to enrich identification, dating, and context.")
+            assessment['detailed_analysis'] = self._build_visual_assessment_summary(assessment, context)
 
         # Recommendations
         assessment['recommendations'] = self._generate_recommendations(assessment, context)
         return assessment
+
+    def _collect_detected_text(self, ocr_regions: List[Dict]) -> str:
+        """Collect confident OCR readings into a compact lookup string."""
+        parts = []
+        for item in ocr_regions:
+            text = (item.get('text') or '').strip()
+            if text and float(item.get('confidence', 0.0)) >= 0.2:
+                parts.append(text)
+        return " ".join(parts[:8])
+
+    def _build_lookup_query(self, analysis: Dict, context: Optional[Dict]) -> str:
+        """Create an external lookup query from OCR, material, and notes."""
+        bits = []
+        detected_text = analysis.get('detected_text') or ''
+        if detected_text:
+            bits.append(detected_text)
+        if context:
+            for key in ('material', 'markings', 'size', 'artifact_type'):
+                value = context.get(key)
+                if value:
+                    bits.append(str(value))
+        if not bits:
+            orientation = analysis.get('orientation')
+            if orientation:
+                bits.append(str(orientation))
+        return ' '.join(bits).strip()
+
+    def _build_visual_assessment_summary(self, assessment: Dict, context: Optional[Dict]) -> str:
+        """Build a useful narrative even when no RAG document context is available."""
+        analysis = assessment.get('analysis', {})
+        parts = [
+            "Image enhancement completed with non-destructive preprocessing and multiple contrast-restoration passes.",
+            f"OCR backend: {analysis.get('ocr_backend', 'unknown')}.",
+        ]
+
+        if analysis.get('ocr_notes'):
+            parts.append(analysis['ocr_notes'])
+        if analysis.get('detected_text'):
+            parts.append(f"Most legible detected reading: {analysis['detected_text']}.")
+        if analysis.get('coin_detection', {}).get('circles'):
+            parts.append("Circular geometry was detected, which may indicate a coin or medallion-like object.")
+        if context and context.get('material'):
+            parts.append(f"Material context supplied: {context['material']}.")
+        if assessment.get('similar_finds'):
+            parts.append("Similar public collection records were found and are listed below for comparison.")
+        else:
+            parts.append("No public collection matches were found from the current query; try adding clearer markings or a more specific material/type.")
+
+        return ' '.join(parts)
     
     def assess_from_text(self, description: Dict, rag_chain=None) -> Dict:
         """Assess artifact from text description with guided questions."""
@@ -149,12 +210,20 @@ class ArtifactAssessment:
         if context:
             if context.get('material'):
                 parts.append(f"Material: {context['material']}")
+            if context.get('artifact_type'):
+                parts.append(f"Artifact type: {context['artifact_type']}")
+            if context.get('script_profile'):
+                parts.append(f"Script profile: {context['script_profile']}")
             if context.get('size'):
                 parts.append(f"Size: {context['size']}")
             if context.get('location'):
                 parts.append(f"Location: {context['location']}")
             if context.get('markings'):
                 parts.append(f"Markings/Decorations: {context['markings']}")
+
+        detected_text = photo_analysis['analysis'].get('detected_text')
+        if detected_text:
+            parts.append(f"Detected visible text: {detected_text}")
         
         return ". ".join(parts)
     

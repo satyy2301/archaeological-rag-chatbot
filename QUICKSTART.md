@@ -14,6 +14,11 @@ source ../venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Optional OCR upgrade for local use:
+```bash
+pip install easyocr
+```
+
 ### Step 2: Set Up API Key
 Create a `.env` file in the `archaeological-rag-chatbot` directory:
 ```
@@ -66,6 +71,18 @@ Optional fallback key for visitors:
 ```toml
 OPENAI_API_KEY = "sk-..."
 ```
+
+Optional Europeana lookup key:
+
+```toml
+EUROPEANA_API_KEY = "your-europeana-key"
+```
+
+Notes for Community Cloud:
+- Do not commit `vector_store/` or populated `user_data/`
+- The app can start without a prebuilt vector index
+- OpenCV uses the headless package for leaner deploys
+- If `easyocr` is not installed, hotspot-based manual review still works
 
 ## 📝 Example Questions to Try
 

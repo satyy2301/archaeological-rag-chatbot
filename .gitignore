@@ -14,6 +14,13 @@ vector_store/
 *.index
 *.pkl
 
+# Runtime app data
+user_data/
+temp_photos/
+artifacts/
+uploads/
+*.faiss
+
 # Environment variables
 .env
 
@@ -32,5 +39,5 @@ temp_*.pdf
 Thumbs.db
 
 # Streamlit
-.streamlit/
+.streamlit/secrets.toml
 

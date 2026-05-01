@@ -1056,6 +1056,9 @@ def _render_found_something_tab():
     
     if input_method == "📷 Photo Upload":
         st.markdown("### Option A: Upload Photo")
+        from image_analyzer import get_script_profiles
+
+        script_profiles = get_script_profiles()
         uploaded_image = st.file_uploader(
             "Upload photo of artifact",
             type=['jpg', 'jpeg', 'png', 'tiff', 'tif'],
@@ -1068,11 +1071,19 @@ def _render_found_something_tab():
             
             # Optional context
             with st.expander("Add Context (Optional)"):
+                script_profile = st.selectbox(
+                    "Script / legend profile",
+                    options=list(script_profiles.keys()),
+                    format_func=lambda key: str(script_profiles[key]["label"]),
+                    help="Choose the script family you expect. Unsupported scripts still get enhancement plus manual review hotspots.",
+                )
                 context = {
+                    'artifact_type': st.selectbox("Artifact type", ['unknown', 'coin', 'inscription', 'manuscript page', 'pottery', 'seal', 'other']),
                     'material': st.selectbox("Material", ['unknown', 'stone', 'metal', 'pottery', 'bone', 'glass', 'organic']),
                     'size': st.selectbox("Size", ['unknown', 'coin-sized', 'hand-sized', 'larger', 'very large']),
                     'location': st.selectbox("Location found", ['unknown', 'garden', 'construction site', 'beach', 'field', 'archaeological site', 'other']),
                     'markings': st.text_area("Markings or decorations", ""),
+                    'script_profile': script_profile,
                 }
                 context = {k: v for k, v in context.items() if v and v != 'unknown'}
             
@@ -1085,6 +1096,9 @@ def _render_found_something_tab():
                     # Basic analysis
                     st.markdown("#### Image Analysis")
                     st.json(assessment['analysis'])
+
+                    if assessment['analysis'].get('ocr_notes'):
+                        st.info(assessment['analysis']['ocr_notes'])
 
                     # Enhancement comparison
                     if assessment.get('visuals'):
@@ -1124,11 +1138,16 @@ def _render_found_something_tab():
                             {
                                 'index': i + 1,
                                 'text': item.get('text', ''),
-                                'confidence': round(float(item.get('confidence', 0.0)), 3)
+                                'confidence': round(float(item.get('confidence', 0.0)), 3),
+                                'top_candidates': ' | '.join(item.get('top_candidates', [])[:3]),
                             }
                             for i, item in enumerate(ocr_items)
                         ])
                         st.dataframe(table, use_container_width=True)
+
+                        if assessment['analysis'].get('detected_text'):
+                            st.caption(f"Detected text summary: {assessment['analysis']['detected_text']}")
+                        st.caption(f"OCR backend: {assessment['analysis'].get('ocr_backend', 'unknown')}")
 
                         selected_idx = st.number_input("Zoom region index", min_value=1, max_value=len(ocr_items), value=1, step=1)
                         if selected_idx:
@@ -1136,6 +1155,11 @@ def _render_found_something_tab():
                             box = ocr_items[selected_idx - 1]['box']
                             zoom = crop_box(image, box)
                             st.image(zoom, caption=f"Zoomed region #{selected_idx}")
+                            candidates = ocr_items[selected_idx - 1].get('top_candidates', [])
+                            if candidates:
+                                st.markdown("**Suggested readings**")
+                                for candidate in candidates:
+                                    st.markdown(f"- {candidate}")
 
                             # Manual correction feedback
                             correction = st.text_input("Suggest transcription / reading for this region")
@@ -1162,6 +1186,29 @@ def _render_found_something_tab():
                                 with open(corr_path, "w", encoding="utf-8") as f:
                                     json.dump(data, f, ensure_ascii=False, indent=2)
                                 st.success("Correction saved. Thanks for the feedback!")
+
+                    if assessment.get('similar_finds'):
+                        st.markdown("#### Similar Finds")
+                        for item in assessment['similar_finds']:
+                            title = item.get('title', 'Untitled result')
+                            source = item.get('source', 'External source')
+                            description = item.get('description', '')
+                            url = item.get('url', '')
+                            image_url = item.get('image_url', '')
+                            with st.container(border=True):
+                                st.markdown(f"**{title}**")
+                                st.caption(source)
+                                if description:
+                                    st.write(description)
+                                meta_bits = [bit for bit in [item.get('date', ''), item.get('material', '')] if bit]
+                                if meta_bits:
+                                    st.caption(" | ".join(meta_bits))
+                                if image_url:
+                                    st.image(image_url, width=220)
+                                if url:
+                                    st.markdown(f"[Open record]({url})")
+                    else:
+                        st.caption("No similar public collection records found from the current image/context query.")
                     
                     # Detailed assessment
                     if assessment.get('detailed_analysis'):
