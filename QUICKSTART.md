@@ -28,8 +28,8 @@ OPENAI_API_KEY=sk-your-api-key-here
 Get your API key from: https://platform.openai.com/api-keys
 
 Alternative for public deployment:
-- Users can enter their own OpenAI API key directly in the app sidebar.
-- The key is stored only in their active browser session.
+- Enter an OpenAI API key directly in the app sidebar.
+- The key is stored only in the active browser session.
 
 ### Step 3: Process the PDF (Optional but Recommended)
 ```bash
@@ -50,8 +50,8 @@ streamlit run app.py
 The app will open automatically in your browser at `http://localhost:8501`
 
 ### Step 5: Start Chatting!
-- If you ran `setup.py`, click "Load Existing Vector Store" in the sidebar
-- Or upload and process the PDF through the web interface
+- If you ran `setup.py`, click "Continue from last session" in the Chat & Analysis page
+- Or upload and process the PDF in the Chat & Analysis page
 - In the sidebar, paste your OpenAI API key and click "Apply key" (if you did not set `.env`)
 - Ask questions about archaeological surveys!
 
@@ -99,8 +99,8 @@ Notes for Community Cloud:
 - Check that the API key is correctly formatted (starts with `sk-`)
 
 ### PDF Processing Fails
-- Make sure the PDF file exists at `../archelogical pdf pr0ooject.pdf`
-- Try uploading the PDF through the web interface instead
+- Try uploading the PDF again from the Chat & Analysis page
+- Make sure the PDF is not password-protected or corrupted
 
 ### Vector Store Not Found
 - Run `python setup.py` to create the vector store

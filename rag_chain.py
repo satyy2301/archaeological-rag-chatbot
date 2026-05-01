@@ -157,7 +157,7 @@ Answer:"""
             raise ValueError("QA chain not initialized")
         
         try:
-            result = self.qa_chain({"query": question})
+            result = self.qa_chain.invoke({"query": question})
             return {
                 "answer": result.get("result", "I couldn't generate an answer."),
                 "source_documents": result.get("source_documents", [])

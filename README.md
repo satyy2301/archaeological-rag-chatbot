@@ -1,6 +1,6 @@
 # 🏛️ Archaeological Survey RAG Chatbot
 
-A Retrieval-Augmented Generation (RAG) chatbot designed to help users with archaeological survey questions. This system processes PDF documents about archaeological surveys and provides intelligent answers based on the document content.
+A Retrieval-Augmented Generation (RAG) chatbot for archaeological survey questions. This system processes PDF documents about archaeological surveys and provides intelligent answers based on the document content.
 
 ## Features
 
@@ -9,7 +9,7 @@ A Retrieval-Augmented Generation (RAG) chatbot designed to help users with archa
 - 💬 **Interactive Chat**: Streamlit-based web interface for easy interaction
 - 🧠 **RAG Architecture**: Combines retrieval and generation for accurate, context-aware answers
 - 📚 **Source Citation**: Shows source documents for transparency
-- 🔑 **Bring Your Own OpenAI Key**: Public users can paste their own OpenAI API key in the sidebar (session-only, not persisted)
+- 🔑 **Bring Your Own OpenAI Key**: Paste an OpenAI API key in the sidebar (kept only for the current browser session)
 - 🖼️ **Artifact Image Analysis**: Upload photos of inscriptions/coins/manuscripts for non-destructive enhancement (denoise, shadow removal, CLAHE, Retinex, sharpening), OCR with bounding boxes and confidence, region zoom, and feedback-saving for future improvements
 - 🌐 **Similar Finds Lookup**: Searches lightweight public collection APIs for comparable objects without bundling bulky local reference datasets
 
@@ -75,17 +75,16 @@ A Retrieval-Augmented Generation (RAG) chatbot designed to help users with archa
    - Or manually navigate to the URL shown in the terminal
 
 3. **Process your PDF (if not pre-processed):**
-   - Use the sidebar to upload your archaeological survey PDF
-   - Or click "Process Default PDF" if the PDF is in the parent directory
-   - Click "Process PDF and Initialize System"
+   - Open the **Chat & Analysis** tab and upload your archaeological survey PDF
+   - Click **Process Document & Start Chatting**
    - Wait for the system to process the document (this may take a few minutes)
-   - **Note:** If you ran `setup.py`, the vector store is already created and you can click "Load Existing Vector Store"
+   - **Note:** If you ran `setup.py`, the vector store is already created and you can click **Continue from last session**
 
 4. **Start chatting:**
    - Once processed, you can ask questions about archaeological surveys
    - The chatbot will provide answers based on the PDF content
    - View source citations to see where the information came from
-   - Public users can paste their own OpenAI API key in the sidebar under **OpenAI API Key**
+   - Paste your OpenAI API key in the sidebar under **OpenAI API Key**
 
 ### Image Analysis (Found Something?)
 - Open the "Found Something?" tab
@@ -101,7 +100,7 @@ A Retrieval-Augmented Generation (RAG) chatbot designed to help users with archa
 ## Deployment Notes
 
 - Do not commit `vector_store/`, uploaded files, or runtime `user_data/` to the repository.
-- On Streamlit Community Cloud, the app defaults to in-memory user/session storage.
+- The app is open-access by default with no login required.
 - OCR is lightweight by default. If `easyocr` is not installed, the app falls back to hotspot detection so the review UI still works.
 - Build the FAISS index at runtime from an uploaded PDF, or host a generated index outside the repo if you need a prebuilt corpus.
 
@@ -111,7 +110,7 @@ A Retrieval-Augmented Generation (RAG) chatbot designed to help users with archa
 archaeological-rag-chatbot/
 ├── app.py                 # Streamlit web application
 ├── pdf_processor.py       # PDF text extraction and chunking
-├── vector_store.py        # Vector embeddings and FAISS/Chroma storage
+├── vector_store.py        # OpenAI embeddings and FAISS storage
 ├── rag_chain.py          # RAG chain implementation
 ├── requirements.txt      # Python dependencies
 ├── .env.example         # Environment variables template
@@ -124,7 +123,7 @@ archaeological-rag-chatbot/
 ## How It Works
 
 1. **PDF Processing**: The PDF is processed to extract text, which is then split into manageable chunks
-2. **Embedding Creation**: Text chunks are converted to vector embeddings using sentence transformers
+2. **Embedding Creation**: Text chunks are converted to vector embeddings using OpenAI embeddings
 3. **Vector Store**: Embeddings are stored in a FAISS vector database for fast similarity search
 4. **Query Processing**: When you ask a question:
    - The question is converted to an embedding
@@ -145,7 +144,7 @@ archaeological-rag-chatbot/
 You can modify the following in the code:
 
 - **Chunk Size**: Adjust `chunk_size` in `pdf_processor.py` (default: 1000 characters)
-- **Embedding Model**: Change `embedding_model` in `vector_store.py` (default: "sentence-transformers/all-MiniLM-L6-v2")
+- **Embedding Model**: Change `embedding_model` in `vector_store.py` (default: "text-embedding-3-small")
 - **LLM Model**: Modify `model_name` in `rag_chain.py` (default: "gpt-3.5-turbo")
 - **Temperature**: Adjust `temperature` for more/less creative responses (default: 0.7)
 
@@ -171,13 +170,13 @@ This repo includes deployment helpers:
 - `.streamlit/config.toml` for Streamlit runtime settings
 - `.streamlit/secrets.toml.example` for optional fallback secret format
 
-### For Public Users' API Keys
+### API Key Entry
 - The app supports session-level key entry in the sidebar.
-- Each user enters their own key with **Apply key**.
+- Enter a key with **Apply key**.
 - The key is not stored in `user_data` files or repository.
 
 ### Optional Owner Key Fallback
-If you want the app to also work without user-entered keys, set a default secret in Streamlit Cloud:
+If you want the app to also work without manually entered keys, set a default secret in Streamlit Cloud:
 - In app settings > **Secrets**, add:
 
 ```toml
@@ -198,7 +197,7 @@ Without this key, the app still uses public sources that do not require authenti
 
 ### "OPENAI_API_KEY not found"
 - For local development, make sure you've created a `.env` file with your OpenAI API key.
-- For public usage, users can paste a key in the sidebar under **OpenAI API Key**.
+- For public usage, you can paste a key in the sidebar under **OpenAI API Key**.
 - On Streamlit Cloud, you can also set `OPENAI_API_KEY` in app secrets as fallback.
 
 ### PDF Processing Errors
@@ -216,7 +215,7 @@ Without this key, the app still uses public sources that do not require authenti
 - **langchain-openai**: OpenAI integration
 - **pdfplumber/pypdf2**: PDF processing
 - **faiss-cpu**: Vector similarity search
-- **sentence-transformers**: Text embeddings
+- **langchain-openai**: OpenAI chat and embedding integration
 - **openai**: OpenAI API client
 
 ## License

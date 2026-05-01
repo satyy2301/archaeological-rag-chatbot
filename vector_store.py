@@ -5,11 +5,10 @@ Creates and manages embeddings and vector database
 
 import os
 from typing import List, Optional, Dict
+from langchain_openai import OpenAIEmbeddings
 try:
-    from langchain_community.embeddings import HuggingFaceEmbeddings
     from langchain_community.vectorstores import FAISS
 except ImportError:
-    from langchain.embeddings import HuggingFaceEmbeddings
     from langchain.vectorstores import FAISS
 
 # Handle LangChain version differences
@@ -39,14 +38,14 @@ class VectorStoreManager:
     """Manage vector store for document embeddings"""
     
     def __init__(self, 
-                 embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+                 embedding_model: str = "text-embedding-3-small",
                  vector_store_type: str = "faiss",
                  persist_directory: Optional[str] = None):
         """
         Initialize vector store manager
         
         Args:
-            embedding_model: HuggingFace model name for embeddings
+            embedding_model: OpenAI embedding model name
             vector_store_type: currently only "faiss"
             persist_directory: Directory to persist vector store
         """
@@ -59,10 +58,7 @@ class VectorStoreManager:
         
         # Initialize embeddings
         logger.info(f"Loading embedding model: {embedding_model}")
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name=embedding_model,
-            model_kwargs={'device': 'cpu'}
-        )
+        self.embeddings = OpenAIEmbeddings(model=embedding_model)
         
         self.vector_store = None
         self.text_splitter = RecursiveCharacterTextSplitter(

@@ -15,7 +15,6 @@ from rag_chain import ArchaeologicalRAGChain
 from vector_store import VectorStoreManager
 from photo_organizer import PhotoOrganizer
 from artifact_assessment import ArtifactAssessment
-from user_manager import UserManager, StreamlitSessionManager
 from report_generator import ReportGenerator
 from PIL import Image
 import logging
@@ -105,12 +104,6 @@ def initialize_session_state():
         st.session_state.photo_organizer = None
     if 'artifact_assessor' not in st.session_state:
         st.session_state.artifact_assessor = None
-    if 'user_manager' not in st.session_state:
-        st.session_state.user_manager = UserManager()
-    if 'session_manager' not in st.session_state:
-        st.session_state.session_manager = StreamlitSessionManager(st.session_state.user_manager)
-    if 'show_registration' not in st.session_state:
-        st.session_state.show_registration = False
     if 'user_openai_api_key' not in st.session_state:
         st.session_state.user_openai_api_key = ""
 
@@ -118,7 +111,7 @@ def initialize_session_state():
 def _initialize_rag_chain_with_current_key() -> bool:
     """Initialize or refresh the RAG chain using a user key (if provided) or .env key."""
     if not st.session_state.vector_store_manager:
-        st.error("Vector store is not ready yet.")
+        st.error("No document has been indexed yet. Please upload and process a PDF first.")
         return False
 
     api_key = st.session_state.get("user_openai_api_key", "").strip() or None
@@ -130,21 +123,21 @@ def _initialize_rag_chain_with_current_key() -> bool:
             openai_api_key=api_key,
         )
         st.session_state.rag_chain = rag_chain
-        st.success("Assistant initialized and ready to answer questions.")
+        st.success("✅ Assistant is ready — start chatting below!")
         return True
     except Exception as e:
         st.session_state.rag_chain = None
         st.error(f"Error initializing assistant: {str(e)}")
         st.info(
-            "Add a valid OpenAI API key in the sidebar (or set OPENAI_API_KEY in .env) and try again."
+            "Please add a valid OpenAI API key in the sidebar (or set OPENAI_API_KEY in your .env file) and try again."
         )
         return False
 
 
 def process_pdf_and_create_vector_store(pdf_path: str):
-    """Process PDF and create vector store"""
+    """Process PDF and create vector store."""
     try:
-        with st.spinner("Processing PDF document..."):
+        with st.spinner("📖 Reading your document..."):
             # Process PDF
             processor = PDFProcessor(pdf_path)
             text_chunks = processor.process(chunk_size=1000, chunk_overlap=200)
@@ -189,22 +182,22 @@ def process_pdf_and_create_vector_store(pdf_path: str):
                 st.error("No text could be extracted from the PDF.")
                 return False
             
-            st.success(f"Extracted {len(text_chunks)} text chunks from PDF")
+            st.success(f"✅ Document read — found {len(text_chunks)} sections of text.")
             
             # Create vector store
-            with st.spinner("Creating vector embeddings..."):
+            with st.spinner("🗂️ Indexing your document (this may take a minute)..."):
                 vector_store_manager = VectorStoreManager(
-                    embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+                    embedding_model="text-embedding-3-small",
                     vector_store_type="faiss",
                     persist_directory="./vector_store"
                 )
                 vector_store_manager.create_vector_store(text_chunks)
                 st.session_state.vector_store_manager = vector_store_manager
                 st.session_state.vector_store_initialized = True
-                st.success("Vector store created successfully!")
+                st.success("✅ Document indexed successfully!")
             
             # Initialize RAG chain (best effort so document processing still succeeds)
-            with st.spinner("Initializing assistant..."):
+            with st.spinner("🤖 Setting up your assistant..."):
                 _initialize_rag_chain_with_current_key()
             return True
                     
@@ -217,7 +210,7 @@ def load_existing_vector_store():
     """Load existing vector store if available"""
     try:
         vector_store_manager = VectorStoreManager(
-            embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+            embedding_model="text-embedding-3-small",
             vector_store_type="faiss",
             persist_directory="./vector_store"
         )
@@ -261,83 +254,11 @@ def _build_mode_preface(mode: str) -> str:
 
 
 def _render_sidebar():
-    """Sidebar: document setup + quick tools."""
+    """Sidebar: API key, document status, and quick tools."""
     with st.sidebar:
-        # User Authentication Section
-        st.header("🔐 Account")
-        
-        session_manager = st.session_state.session_manager
-        user_manager = st.session_state.user_manager
-        current_user = session_manager.get_current_user(st.session_state)
-        
-        if current_user:
-            # User is logged in
-            st.success(f"👤 {current_user['name']}")
-            st.caption(f"Role: {current_user['role']}")
-            if st.button("🚪 Logout", use_container_width=True):
-                session_manager.logout(st.session_state)
-                st.rerun()
-        else:
-            # User is not logged in
-            if not st.session_state.show_registration:
-                # Login form
-                st.subheader("Login")
-                login_email = st.text_input("Email", key="login_email")
-                login_password = st.text_input("Password", type="password", key="login_password")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("🔑 Login", use_container_width=True):
-                        if login_email and login_password:
-                            result = session_manager.login(st.session_state, login_email, login_password)
-                            if result['success']:
-                                st.success(result['message'])
-                                st.rerun()
-                            else:
-                                st.error(result['message'])
-                        else:
-                            st.warning("Please enter email and password")
-                
-                with col2:
-                    if st.button("📝 Register", use_container_width=True):
-                        st.session_state.show_registration = True
-                        st.rerun()
-            else:
-                # Registration form
-                st.subheader("Register")
-                reg_name = st.text_input("Name", key="reg_name")
-                reg_email = st.text_input("Email", key="reg_email")
-                reg_password = st.text_input("Password", type="password", key="reg_password")
-                reg_role = st.selectbox(
-                    "Role",
-                    options=['public', 'student', 'professional'],
-                    format_func=lambda x: user_manager.USER_ROLES.get(x, x),
-                    key="reg_role"
-                )
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("✅ Create Account", use_container_width=True):
-                        if reg_name and reg_email and reg_password:
-                            result = user_manager.register_user(reg_email, reg_password, reg_role, reg_name)
-                            if result['success']:
-                                st.success(result['message'])
-                                st.session_state.show_registration = False
-                                st.rerun()
-                            else:
-                                st.error(result['message'])
-                        else:
-                            st.warning("Please fill all fields")
-                
-                with col2:
-                    if st.button("← Back to Login", use_container_width=True):
-                        st.session_state.show_registration = False
-                        st.rerun()
-        
-        st.markdown("---")
         st.header("🔑 OpenAI API Key")
         st.caption(
-            "For public use, each visitor can paste their own key. It is only kept in this browser session."
+            "Paste your OpenAI API key for this browser session."
         )
         entered_key = st.text_input(
             "Your OpenAI API Key",
@@ -361,57 +282,17 @@ def _render_sidebar():
                 st.info("Session key cleared.")
 
         st.markdown("---")
-        st.header("📚 Document Setup")
-        
-        # Check if vector store exists
-        vector_store_path = Path("./vector_store")
-        if vector_store_path.exists() and st.session_state.vector_store_initialized is False:
-            if st.button("Load Existing Vector Store", use_container_width=True):
-                if load_existing_vector_store():
-                    st.success("Vector store loaded!")
-                else:
-                    st.error("Failed to load vector store")
-        
-        # PDF upload
-        st.subheader("Upload PDF Document")
-        pdf_file = st.file_uploader(
-            "Choose a PDF file",
-            type=["pdf"],
-            help="Upload the archaeological survey PDF document",
-        )
-        
-        if pdf_file is not None:
-            st.session_state.uploaded_pdf_name = pdf_file.name
-            # Save uploaded file temporarily
-            pdf_path = f"./temp_{pdf_file.name}"
-            with open(pdf_path, "wb") as f:
-                f.write(pdf_file.getbuffer())
-            
-            if st.button("⚙️ Process PDF and Initialize", use_container_width=True):
-                success = process_pdf_and_create_vector_store(pdf_path)
-                if success and os.path.exists(pdf_path):
-                        os.remove(pdf_path)
-        
-        # Default PDF path
-        st.subheader("Or Use Default PDF")
-        possible_paths = [
-            "../archelogical pdf pr0ooject.pdf",
-            "archelogical pdf pr0ooject.pdf",
-            "../archelogical pdf pr0ooject.pdf",
-        ]
-        default_pdf_path = None
-        for path in possible_paths:
-            if os.path.exists(path):
-                default_pdf_path = path
-                break
-        
-        if default_pdf_path:
-            if st.button("📄 Process Default PDF", use_container_width=True):
-                _ = process_pdf_and_create_vector_store(default_pdf_path)
-        else:
-            st.info("Default PDF not found. Please upload a PDF file.")
-        
-        st.markdown("---")
+        # Show current document name if one is loaded
+        if st.session_state.vector_store_initialized:
+            st.success(f"📄 **{st.session_state.uploaded_pdf_name or 'Document'}** loaded")
+            if st.button("🔄 Load a different document", use_container_width=True):
+                st.session_state.vector_store_initialized = False
+                st.session_state.rag_chain = None
+                st.session_state.vector_store_manager = None
+                st.session_state.uploaded_pdf_name = None
+                st.session_state.messages = []
+                st.rerun()
+            st.markdown("---")
 
         st.header("🧭 Assistant Mode")
         mode = st.selectbox(
@@ -429,7 +310,7 @@ def _render_sidebar():
         st.session_state.active_mode = mode
 
         st.caption(
-            "💡 Tip: Public users can paste their own API key above, or you can set OPENAI_API_KEY in .env."
+            "💡 Tip: Paste your API key above, or set OPENAI_API_KEY in .env."
         )
 
         st.markdown("---")
@@ -540,26 +421,82 @@ def _render_chat_tab():
             )
     
     else:
-        # Welcome message
-        st.info(
-            "👋 Welcome! Upload and process a PDF document in the sidebar to unlock chat and tools."
-        )
+        # ── Onboarding / upload screen ────────────────────────────────────────
+        st.markdown("## 👋 Welcome to the Archaeological Survey Assistant")
         st.markdown(
-            """
-            ### How to use
-            1. **Upload PDF** in the sidebar (or use the default PDF if available).
-            2. **Process Document** to create embeddings and initialise the RAG system.
-            3. **Pick an Assistant Mode** (e.g. artifact identification, stratigraphy, permits).
-            4. **Start Chatting** in this tab using archaeological language.
-
-            ### Example questions
-        - What are the key steps in conducting an archaeological survey?
-            - How do I identify potential archaeological sites from this description?
-            - Suggest a survey methodology for a river valley transect.
-            - What legal permissions are typically required before excavation?
-            - Summarise the main findings from this report.
-            """
+            "Upload any archaeological PDF — a survey report, excavation notes, or research paper — "
+            "and ask questions about it in plain English. No technical knowledge needed."
         )
+        st.markdown("---")
+
+        col_upload, col_help = st.columns([3, 2], gap="large")
+
+        with col_upload:
+            st.markdown("### 📄 Step 1 — Upload your document")
+
+            # Warn if no API key yet
+            api_key_ok = bool(st.session_state.get("user_openai_api_key", "").strip()) or bool(os.getenv("OPENAI_API_KEY"))
+            if not api_key_ok:
+                st.warning(
+                    "⚠️ **Add your OpenAI API key first** — paste it in the sidebar on the left, "
+                    "then upload your document here."
+                )
+
+            pdf_file = st.file_uploader(
+                "Choose a PDF file (up to 200 MB)",
+                type=["pdf"],
+                key="main_pdf_uploader",
+                help="Your file is only used in this session and is never stored permanently.",
+            )
+
+            if pdf_file is not None:
+                st.session_state.uploaded_pdf_name = pdf_file.name
+                pdf_path = f"./temp_{pdf_file.name}"
+                with open(pdf_path, "wb") as f:
+                    f.write(pdf_file.getbuffer())
+                st.success(f"✅ **{pdf_file.name}** is ready to process")
+                if st.button(
+                    "⚙️ Process Document & Start Chatting",
+                    use_container_width=True,
+                    key="main_process_btn",
+                    disabled=not api_key_ok,
+                ):
+                    success = process_pdf_and_create_vector_store(pdf_path)
+                    if success:
+                        if os.path.exists(pdf_path):
+                            os.remove(pdf_path)
+                        st.rerun()
+
+            # Resume from a previously indexed document on disk
+            vector_store_path = Path("./vector_store")
+            if vector_store_path.exists() and not st.session_state.vector_store_initialized:
+                st.markdown("---")
+                st.markdown("**Already processed a document before? Resume your session:**")
+                if st.button("📂 Continue from last session", use_container_width=True, key="main_load_btn"):
+                    if load_existing_vector_store():
+                        st.rerun()
+                    else:
+                        st.error("Could not reload the previous session. Please upload a new document.")
+
+        with col_help:
+            st.markdown("### 💡 What can I ask?")
+            st.markdown(
+                """
+                Once your document is loaded, try asking:
+
+                - *"What is this document about?"*
+                - *"Which archaeological sites are mentioned?"*
+                - *"What survey methods were used?"*
+                - *"Summarise the main findings."*
+                - *"What permits or laws are discussed?"*
+                - *"Explain stratigraphy in simple terms."*
+                """
+            )
+            st.markdown("### 🔑 Need an API key?")
+            st.markdown(
+                "Get one at [platform.openai.com](https://platform.openai.com) "
+                "→ paste it in the **OpenAI API Key** field in the sidebar."
+            )
 
 
 def _render_visualisations_tab():
@@ -988,7 +925,7 @@ def _render_photo_organizer_tab():
                     with cols[idx % 4]:
                         try:
                             img = Image.open(photo['file_path'])
-                            st.image(img, use_container_width=True, caption=photo['file_name'])
+                            st.image(img, width='stretch', caption=photo['file_name'])
                         except:
                             st.text(photo['file_name'])
         
@@ -1092,13 +1029,26 @@ def _render_found_something_tab():
                     assessment = assessor.assess_from_photo(image, context if 'context' in locals() else None)
                     
                     st.markdown("### Assessment Results")
-                    
-                    # Basic analysis
-                    st.markdown("#### Image Analysis")
-                    st.json(assessment['analysis'])
 
-                    if assessment['analysis'].get('ocr_notes'):
-                        st.info(assessment['analysis']['ocr_notes'])
+                    # Layman-first summary
+                    st.markdown("#### What this likely is")
+                    summary_text = assessment.get('layman_summary') or assessment.get('detailed_analysis') or "No summary available for this image yet."
+                    st.markdown(summary_text)
+
+                    # Optional deeper narrative
+                    if assessment.get('detailed_analysis'):
+                        with st.expander("Read full detailed assessment"):
+                            st.markdown(assessment['detailed_analysis'])
+                            if assessment.get('sources'):
+                                st.markdown("**Source snippets**")
+                                for source in assessment['sources'][:3]:
+                                    if isinstance(source, dict):
+                                        source_text = source.get('content') or source.get('page_content', '')
+                                    else:
+                                        source_text = getattr(source, 'page_content', '')
+                                    if not source_text:
+                                        source_text = str(source)
+                                    st.text(source_text[:500])
 
                     # Enhancement comparison
                     if assessment.get('visuals'):
@@ -1127,68 +1077,9 @@ def _render_found_something_tab():
                                 st.caption("Normalized")
                                 st.image(assessment['visuals']['pre_normalized'])
 
-                    # OCR overlays and interactive zoom
-                    if assessment['analysis'].get('ocr'):
-                        st.markdown("#### Detected Regions & OCR")
-                        st.image(assessment['visuals'].get('boxed', None), caption="Detected regions (numbered)")
-                        ocr_items = assessment['analysis']['ocr']
-                        # Build simple table
-                        import pandas as _pd
-                        table = _pd.DataFrame([
-                            {
-                                'index': i + 1,
-                                'text': item.get('text', ''),
-                                'confidence': round(float(item.get('confidence', 0.0)), 3),
-                                'top_candidates': ' | '.join(item.get('top_candidates', [])[:3]),
-                            }
-                            for i, item in enumerate(ocr_items)
-                        ])
-                        st.dataframe(table, use_container_width=True)
-
-                        if assessment['analysis'].get('detected_text'):
-                            st.caption(f"Detected text summary: {assessment['analysis']['detected_text']}")
-                        st.caption(f"OCR backend: {assessment['analysis'].get('ocr_backend', 'unknown')}")
-
-                        selected_idx = st.number_input("Zoom region index", min_value=1, max_value=len(ocr_items), value=1, step=1)
-                        if selected_idx:
-                            from image_analyzer import crop_box
-                            box = ocr_items[selected_idx - 1]['box']
-                            zoom = crop_box(image, box)
-                            st.image(zoom, caption=f"Zoomed region #{selected_idx}")
-                            candidates = ocr_items[selected_idx - 1].get('top_candidates', [])
-                            if candidates:
-                                st.markdown("**Suggested readings**")
-                                for candidate in candidates:
-                                    st.markdown(f"- {candidate}")
-
-                            # Manual correction feedback
-                            correction = st.text_input("Suggest transcription / reading for this region")
-                            if st.button("Save correction", key=f"save_corr_{selected_idx}"):
-                                import json, os
-                                os.makedirs("user_data", exist_ok=True)
-                                corr_path = os.path.join("user_data", "corrections.json")
-                                data = []
-                                if os.path.exists(corr_path):
-                                    try:
-                                        with open(corr_path, "r", encoding="utf-8") as f:
-                                            data = json.load(f)
-                                    except Exception:
-                                        data = []
-                                entry = {
-                                    'timestamp': datetime.now().isoformat(),
-                                    'file_name': uploaded_image.name,
-                                    'region_index': int(selected_idx),
-                                    'box': box,
-                                    'suggestion': correction,
-                                    'context': context if 'context' in locals() else {}
-                                }
-                                data.append(entry)
-                                with open(corr_path, "w", encoding="utf-8") as f:
-                                    json.dump(data, f, ensure_ascii=False, indent=2)
-                                st.success("Correction saved. Thanks for the feedback!")
-
                     if assessment.get('similar_finds'):
                         st.markdown("#### Similar Finds")
+                        st.caption("These are approximate matches from public collections and may include unrelated items.")
                         for item in assessment['similar_finds']:
                             title = item.get('title', 'Untitled result')
                             source = item.get('source', 'External source')
@@ -1209,21 +1100,79 @@ def _render_found_something_tab():
                                     st.markdown(f"[Open record]({url})")
                     else:
                         st.caption("No similar public collection records found from the current image/context query.")
-                    
-                    # Detailed assessment
-                    if assessment.get('detailed_analysis'):
-                        st.markdown("#### Detailed Assessment")
-                        st.markdown(assessment['detailed_analysis'])
-                        
-                        if assessment.get('sources'):
-                            with st.expander("📖 View Sources"):
-                                for source in assessment['sources'][:3]:
-                                    st.text(source.get('content', '')[:500])
-                    
+
                     # Recommendations
-                    st.markdown("#### Recommendations")
+                    st.markdown("#### What to do next")
                     for rec in assessment.get('recommendations', []):
                         st.markdown(f"- {rec}")
+
+                    # Technical/advanced details
+                    with st.expander("Technical details (advanced)"):
+                        st.markdown("**Image analysis payload**")
+                        st.json(assessment.get('analysis', {}))
+
+                        if assessment.get('analysis', {}).get('ocr_notes'):
+                            st.info(assessment['analysis']['ocr_notes'])
+
+                        # OCR overlays and interactive zoom
+                        if assessment.get('analysis', {}).get('ocr'):
+                            st.markdown("**Detected Regions & OCR**")
+                            st.image(assessment['visuals'].get('boxed', None), caption="Detected regions (numbered)")
+                            ocr_items = assessment['analysis']['ocr']
+                            # Build simple table
+                            import pandas as _pd
+                            table = _pd.DataFrame([
+                                {
+                                    'index': i + 1,
+                                    'text': item.get('text', ''),
+                                    'confidence': round(float(item.get('confidence', 0.0)), 3),
+                                    'top_candidates': ' | '.join(item.get('top_candidates', [])[:3]),
+                                }
+                                for i, item in enumerate(ocr_items)
+                            ])
+                            st.dataframe(table, use_container_width=True)
+
+                            if assessment['analysis'].get('detected_text'):
+                                st.caption(f"Detected text summary: {assessment['analysis']['detected_text']}")
+                            st.caption(f"OCR backend: {assessment['analysis'].get('ocr_backend', 'unknown')}")
+
+                            selected_idx = st.number_input("Zoom region index", min_value=1, max_value=len(ocr_items), value=1, step=1)
+                            if selected_idx:
+                                from image_analyzer import crop_box
+                                box = ocr_items[selected_idx - 1]['box']
+                                zoom = crop_box(image, box)
+                                st.image(zoom, caption=f"Zoomed region #{selected_idx}")
+                                candidates = ocr_items[selected_idx - 1].get('top_candidates', [])
+                                if candidates:
+                                    st.markdown("**Suggested readings**")
+                                    for candidate in candidates:
+                                        st.markdown(f"- {candidate}")
+
+                                # Manual correction feedback
+                                correction = st.text_input("Suggest transcription / reading for this region")
+                                if st.button("Save correction", key=f"save_corr_{selected_idx}"):
+                                    import json, os
+                                    os.makedirs("user_data", exist_ok=True)
+                                    corr_path = os.path.join("user_data", "corrections.json")
+                                    data = []
+                                    if os.path.exists(corr_path):
+                                        try:
+                                            with open(corr_path, "r", encoding="utf-8") as f:
+                                                data = json.load(f)
+                                        except Exception:
+                                            data = []
+                                    entry = {
+                                        'timestamp': datetime.now().isoformat(),
+                                        'file_name': uploaded_image.name,
+                                        'region_index': int(selected_idx),
+                                        'box': box,
+                                        'suggestion': correction,
+                                        'context': context if 'context' in locals() else {}
+                                    }
+                                    data.append(entry)
+                                    with open(corr_path, "w", encoding="utf-8") as f:
+                                        json.dump(data, f, ensure_ascii=False, indent=2)
+                                    st.success("Correction saved. Thanks for the feedback!")
     
     else:  # Text Description
         st.markdown("### Option B: Text Description")
@@ -1285,7 +1234,13 @@ def _render_found_something_tab():
                     if assessment.get('sources'):
                         with st.expander("📖 View Sources"):
                             for source in assessment['sources'][:3]:
-                                st.text(source.get('content', '')[:500])
+                                if isinstance(source, dict):
+                                    source_text = source.get('content') or source.get('page_content', '')
+                                else:
+                                    source_text = getattr(source, 'page_content', '')
+                                if not source_text:
+                                    source_text = str(source)
+                                st.text(source_text[:500])
                 
                 # Recommendations
                 st.markdown("#### Recommendations")

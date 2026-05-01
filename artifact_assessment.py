@@ -94,6 +94,9 @@ class ArtifactAssessment:
         else:
             assessment['detailed_analysis'] = self._build_visual_assessment_summary(assessment, context)
 
+        # Layman-first summary for top-of-page rendering
+        assessment['layman_summary'] = self._build_layman_summary(assessment, context)
+
         # Recommendations
         assessment['recommendations'] = self._generate_recommendations(assessment, context)
         return assessment
@@ -146,6 +149,65 @@ class ArtifactAssessment:
             parts.append("No public collection matches were found from the current query; try adding clearer markings or a more specific material/type.")
 
         return ' '.join(parts)
+
+    def _build_layman_summary(self, assessment: Dict, context: Optional[Dict]) -> str:
+        """Create a plain-language summary that non-technical users see first."""
+        analysis = assessment.get('analysis', {})
+        circles = analysis.get('coin_detection', {}).get('circles') or []
+        detected_text = (analysis.get('detected_text') or '').strip()
+        similar_count = len(assessment.get('similar_finds') or [])
+
+        artifact_hint = (context or {}).get('artifact_type', '')
+        if artifact_hint and artifact_hint != 'unknown':
+            likely_object = artifact_hint
+        elif circles:
+            likely_object = "a coin or medallion-like object"
+        elif detected_text:
+            likely_object = "an inscribed or marked object"
+        else:
+            likely_object = "an archaeological object image that needs closer review"
+
+        score = 0
+        if artifact_hint and artifact_hint != 'unknown':
+            score += 2
+        if circles:
+            score += 2
+        if detected_text:
+            score += 1
+        if similar_count > 0:
+            score += 1
+        if (context or {}).get('material'):
+            score += 1
+
+        if score >= 5:
+            confidence = "High"
+        elif score >= 3:
+            confidence = "Medium"
+        else:
+            confidence = "Low"
+
+        lines = []
+        lines.append(f"Likely identification: {likely_object}.")
+        lines.append(f"Confidence level: {confidence}.")
+
+        why_bits = []
+        if circles:
+            why_bits.append("the image contains strong circular geometry")
+        if detected_text:
+            why_bits.append("some readable markings/text were detected")
+        if similar_count:
+            why_bits.append(f"{similar_count} approximate matches were found in public collections")
+        if (context or {}).get('material'):
+            why_bits.append(f"material context was provided ({context.get('material')})")
+
+        if why_bits:
+            lines.append("Why we think this: " + "; ".join(why_bits) + ".")
+
+        lines.append(
+            "Next step: compare the enhanced images below and check Similar Finds to decide whether this is likely a coin, inscription, seal, or another artifact type."
+        )
+
+        return "\n\n".join(lines)
     
     def assess_from_text(self, description: Dict, rag_chain=None) -> Dict:
         """Assess artifact from text description with guided questions."""

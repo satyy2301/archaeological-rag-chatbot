@@ -12,7 +12,7 @@
 ### 2. Vector Store Manager (`vector_store.py`)
 - **Purpose**: Manages document embeddings and similarity search
 - **Components**:
-  - **Embeddings**: Uses HuggingFace sentence transformers (default: `all-MiniLM-L6-v2`)
+  - **Embeddings**: Uses OpenAI embeddings (default: `text-embedding-3-small`)
   - **Vector Database**: FAISS for fast similarity search
   - **Text Splitter**: RecursiveCharacterTextSplitter for intelligent chunking
 - **Features**:
@@ -75,7 +75,7 @@ Answer + Sources
 
 - **Web Framework**: Streamlit
 - **RAG Framework**: LangChain
-- **Embeddings**: Sentence Transformers (HuggingFace)
+- **Embeddings**: OpenAI Embeddings
 - **Vector Database**: FAISS (CPU)
 - **LLM**: OpenAI GPT-3.5-turbo
 - **PDF Processing**: pdfplumber, PyPDF2
@@ -84,8 +84,8 @@ Answer + Sources
 ## Configuration Options
 
 ### Embedding Model
-- Default: `sentence-transformers/all-MiniLM-L6-v2`
-- Can be changed to other HuggingFace models
+- Default: `text-embedding-3-small`
+- Can be changed to other OpenAI embedding models
 - Location: `vector_store.py`
 
 ### Chunk Size
@@ -129,7 +129,7 @@ archaeological-rag-chatbot/
 
 For Streamlit Community Cloud:
 - Keep runtime data out of git
-- Use in-memory session persistence by default
+- Use temporary in-browser session state by default (open access, no login)
 - Build or fetch vector indexes outside the repository
 
 ## Extensibility
@@ -139,6 +139,5 @@ The system can be extended to:
 - Use local LLMs (Ollama, etc.)
 - Add different embedding models
 - Implement conversation memory
-- Add user authentication
 - Export chat history
 

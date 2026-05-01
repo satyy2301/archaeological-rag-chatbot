@@ -48,7 +48,7 @@ def setup_vector_store(pdf_path: str):
     # Create vector store
     logger.info("Step 2: Creating vector embeddings...")
     vector_store_manager = VectorStoreManager(
-        embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+        embedding_model="text-embedding-3-small",
         vector_store_type="faiss",
         persist_directory="./vector_store"
     )
