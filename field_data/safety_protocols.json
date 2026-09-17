@@ -1,0 +1,23 @@
+{
+  "emergency_contacts": [],
+  "first_aid_location": "",
+  "hazard_log": [],
+  "safety_protocols": [
+    {
+      "title": "Site Safety",
+      "content": "Always wear appropriate safety equipment. Be aware of site hazards."
+    },
+    {
+      "title": "Weather Conditions",
+      "content": "Check weather forecast. Secure equipment in case of severe weather."
+    },
+    {
+      "title": "Emergency Procedures",
+      "content": "Know emergency contact numbers. Have first aid kit accessible."
+    },
+    {
+      "title": "Team Communication",
+      "content": "Maintain regular check-ins. Share location with team members."
+    }
+  ]
+}

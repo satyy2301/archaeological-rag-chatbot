@@ -5,3 +5,15 @@ fileWatcherType = "none"
 
 [browser]
 gatherUsageStats = false
+
+[client]
+showSidebarNavigation = false
+
+[theme]
+base = "light"
+primaryColor = "#8B7355"
+backgroundColor = "#FAFAF8"
+secondaryBackgroundColor = "#F3F0EB"
+textColor = "#1F2937"
+font = "sans serif"
+chartC = "#8B7355"

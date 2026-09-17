@@ -1,6 +1,9 @@
-# 🏛️ Archaeological Survey RAG Chatbot
+# 🏛️ Online Archaeological Research Lab
 
-A Retrieval-Augmented Generation (RAG) chatbot for archaeological survey questions. This system processes PDF documents about archaeological surveys and provides intelligent answers based on the document content.
+A free, open-access browser workspace for archaeological research. Upload survey PDFs, analyze artifacts, organize field photos, visualize sites, and generate reports — powered by Retrieval-Augmented Generation (RAG) with source citations.
+
+**Landing page:** `streamlit run app.py` opens the public home experience.  
+**Direct lab access:** bookmark the **Research Lab** page (`/Research_Lab`) to skip the landing page.
 
 ## Features
 
@@ -74,20 +77,23 @@ A Retrieval-Augmented Generation (RAG) chatbot for archaeological survey questio
    - The app will automatically open at `http://localhost:8501`
    - Or manually navigate to the URL shown in the terminal
 
-3. **Process your PDF (if not pre-processed):**
-   - Open the **Chat & Analysis** tab and upload your archaeological survey PDF
+3. **Enter the Research Lab:**
+   - Click **Enter Research Lab** on the landing page, or open the **Research Lab** page directly
+   - Follow the 3-step onboarding: API key → upload PDF → choose a lab station
+
+4. **Process your PDF (if not pre-processed):**
+   - At the **Document Intelligence Desk**, upload your archaeological survey PDF
    - Click **Process Document & Start Chatting**
    - Wait for the system to process the document (this may take a few minutes)
    - **Note:** If you ran `setup.py`, the vector store is already created and you can click **Continue from last session**
 
-4. **Start chatting:**
-   - Once processed, you can ask questions about archaeological surveys
-   - The chatbot will provide answers based on the PDF content
-   - View source citations to see where the information came from
+5. **Start researching:**
+   - Navigate between six lab stations using the sidebar
+   - Ask questions with source citations at the Document Intelligence Desk
    - Paste your OpenAI API key in the sidebar under **OpenAI API Key**
 
-### Image Analysis (Found Something?)
-- Open the "Found Something?" tab
+### Image Analysis (Artifact Analysis Station)
+- Open the **Artifact Analysis Station**
 - Upload a high-resolution photo (JPEG/PNG/TIFF)
 - Optionally add context (artifact type, material, size, location, markings, script profile)
 - Click "Assess Artifact" to see:
@@ -108,17 +114,34 @@ A Retrieval-Augmented Generation (RAG) chatbot for archaeological survey questio
 
 ```
 archaeological-rag-chatbot/
-├── app.py                 # Streamlit web application
-├── pdf_processor.py       # PDF text extraction and chunking
-├── vector_store.py        # OpenAI embeddings and FAISS storage
-├── rag_chain.py          # RAG chain implementation
-├── requirements.txt      # Python dependencies
-├── .env.example         # Environment variables template
-├── README.md            # This file
-├── image_analyzer.py     # Image preprocessing, enhancement, OCR, overlays
-├── artifact_lookup.py    # Lightweight external collection lookup
-└── vector_store/         # Generated locally or at runtime, not committed
+├── app.py                      # Landing page (public home)
+├── pages/
+│   └── 1_Research_Lab.py       # Lab workbench orchestrator
+├── ui/                         # Theme, sidebar, stations, components
+├── lab/services.py             # PDF/RAG initialization
+├── assets/styles.css           # Shared design system
+├── pdf_processor.py            # PDF text extraction and chunking
+├── vector_store.py             # OpenAI embeddings and FAISS storage
+├── rag_chain.py                # RAG chain implementation
+├── image_analyzer.py           # Image preprocessing, enhancement, OCR
+├── artifact_lookup.py          # Public collection lookup
+├── report_generator.py         # Report templates
+├── public_engagement.py        # Site story builder
+├── smart_field_assistant.py    # Field checklist
+├── quality_assurance.py        # QA checks
+└── vector_store/               # Generated locally, not committed
 ```
+
+### Lab Stations
+
+| Station | Purpose |
+|---------|---------|
+| Document Intelligence Desk | PDF upload, RAG chat, source citations |
+| Artifact Analysis Station | Photo/text artifact assessment |
+| Field Photo Archive | Photo organization, field checklist |
+| Spatial Analysis Room | Maps, timelines, site relationships |
+| Reference Library | Glossary, source tips, outreach stories |
+| Research Output Office | Reports, compliance, citations, session export |
 
 ## How It Works
 

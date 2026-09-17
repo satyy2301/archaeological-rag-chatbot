@@ -42,18 +42,19 @@ This will:
 
 **Note:** This step takes 5-10 minutes depending on PDF size.
 
-### Step 4: Run the Chatbot
+### Step 4: Run the Research Lab
 ```bash
 streamlit run app.py
 ```
 
-The app will open automatically in your browser at `http://localhost:8501`
+The app will open at `http://localhost:8501` with the **landing page**.
 
-### Step 5: Start Chatting!
-- If you ran `setup.py`, click "Continue from last session" in the Chat & Analysis page
-- Or upload and process the PDF in the Chat & Analysis page
-- In the sidebar, paste your OpenAI API key and click "Apply key" (if you did not set `.env`)
-- Ask questions about archaeological surveys!
+### Step 5: Enter the Lab
+1. Click **Enter Research Lab** on the landing page (or bookmark `/Research_Lab` for direct access)
+2. Paste your OpenAI API key in the sidebar and click **Apply key** (if you did not set `.env`)
+3. Follow the onboarding wizard: API key → upload PDF → choose a station
+4. If you ran `setup.py`, click **Continue from last session** at the Document Intelligence Desk
+5. Navigate between lab stations using the sidebar and start researching!
 
 ## 🌍 Deploy Publicly in Minutes (Recommended)
 
@@ -100,7 +101,7 @@ Notes for Community Cloud:
 - Check that the API key is correctly formatted (starts with `sk-`)
 
 ### PDF Processing Fails
-- Try uploading the PDF again from the Chat & Analysis page
+- Try uploading the PDF again from the Document Intelligence Desk
 - Make sure the PDF is not password-protected or corrupted
 
 ### Streamlit Cloud dependency install fails

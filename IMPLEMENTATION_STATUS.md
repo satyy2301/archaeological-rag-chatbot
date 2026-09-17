@@ -48,37 +48,34 @@
 - Updated requirements.txt with Pillow for image processing
 - Session state management for new features
 
+## ✅ Research Lab UI (Completed)
+
+### Landing Page & Lab Workbench
+- **Landing page** (`app.py`) — hero, value pillars, how-it-works, station preview, trust section
+- **Multi-page app** — `pages/1_Research_Lab.py` workbench with sidebar station navigation
+- **Six lab stations** — extracted to `ui/stations/` modules
+- **Onboarding wizard** — 3-step flow: API key → upload PDF → choose station
+- **Shared theme** — `assets/styles.css` + `ui/theme.py`
+
+### Module Integrations
+- **Report Generator** (`report_generator.py`) — wired in Research Output Office
+- **Public Engagement** (`public_engagement.py`) — site story builder in Reference Library
+- **Smart Field Assistant** (`smart_field_assistant.py`) — field checklist in Field Photo Archive
+- **Quality Assurance** (`quality_assurance.py`) — post-report QA in Research Output Office
+- **Session export** — JSON/CSV download from Research Output Office (no server persistence)
+
 ## 🔄 In Progress / Next Steps
 
-### Phase 1: Core Production Features (Week 1-2)
-1. **Data Management** (`data_manager.py`)
-   - Project-based organization
-   - Version control
-   - Export/Import (CSV, GeoJSON, KML, PDF)
-   - Backup system
-   - Search across projects
+### Phase 1: Core Production Features
+1. **Data Management** (`data_manager.py`) — persistent multi-project storage (session export done)
+2. **Auto-save and Data Persistence** — save chats, documents, maps per user
+3. **Export/Import** — GeoJSON, KML, GPS data import
+4. **Basic Mobile Responsiveness** — responsive design improvements
 
-2. **Auto-save and Data Persistence**
-   - Save chats, documents, maps per user
-   - Configuration transfer
-   - Data migration tools
-
-3. **Export/Import Functionality**
-   - CSV exports
-   - GeoJSON exports
-   - PDF report exports
-   - GPS data import
-
-4. **Basic Mobile Responsiveness**
-   - Responsive design improvements
-   - Touch-friendly interface
-
-### Phase 2: Professional Features (Week 3-4)
-5. Field recording tools (`field_assistant.py`)
-6. Report generation system (`report_generator.py`)
-7. Compliance tracking (`compliance_manager.py`)
-8. Team collaboration features
-9. Data validation tools
+### Phase 2: Professional Features
+5. Full field recording tools
+6. Compliance tracking (`compliance_manager.py`)
+7. Team collaboration features
 
 ### Phase 3: Advanced Features (Month 2)
 10. Advanced analytics
@@ -96,14 +93,15 @@
 
 ## 📁 New Files Created
 
-1. `photo_organizer.py` - Photo organization and metadata extraction
-2. `artifact_assessment.py` - Artifact assessment from photos/text
-3. `IMPLEMENTATION_STATUS.md` - This file
+1. `ui/` — theme, session, sidebar, components, station modules
+2. `lab/services.py` — PDF/RAG initialization services
+3. `assets/styles.css` — shared design system
+4. `pages/1_Research_Lab.py` — lab workbench page
 
 ## 📝 Modified Files
 
-1. `app.py` - Integrated new features, simplified modes, added new tabs
-2. `requirements.txt` - Added Pillow>=10.0.0
+1. `app.py` — refactored to landing page
+2. `README.md`, `QUICKSTART.md` — Research Lab framing
 
 ## 🚀 How to Test
 
@@ -118,9 +116,11 @@
    ```
 
 3. Test new features:
-   - **Photo Organizer**: Go to "📸 Photo Organizer" tab, upload photos or scan directory
-   - **Found Something**: Go to "🔍 Found Something?" tab, try both photo upload and text description
-   - **Simplified Modes**: Check sidebar - should see 4 modes instead of 11
+   - **Landing**: Hero, station tiles, Enter Research Lab CTA
+   - **Document Intelligence Desk**: Upload PDF, chat with sources
+   - **Artifact Analysis Station**: Photo upload and text description
+   - **Field Photo Archive**: Upload photos, field checklist
+   - **Research Output Office**: Report generation, QA check, session export
 
 ## ⚠️ Notes
 
