@@ -40,7 +40,8 @@ class VectorStoreManager:
     def __init__(self, 
                  embedding_model: str = "text-embedding-3-small",
                  vector_store_type: str = "faiss",
-                 persist_directory: Optional[str] = None):
+                 persist_directory: Optional[str] = None,
+                 openai_api_key: Optional[str] = None):
         """
         Initialize vector store manager
         
@@ -48,6 +49,7 @@ class VectorStoreManager:
             embedding_model: OpenAI embedding model name
             vector_store_type: currently only "faiss"
             persist_directory: Directory to persist vector store
+            openai_api_key: Optional OpenAI API key (falls back to OPENAI_API_KEY env var)
         """
         self.embedding_model = embedding_model
         self.vector_store_type = vector_store_type.lower()
@@ -56,9 +58,16 @@ class VectorStoreManager:
         if self.vector_store_type != "faiss":
             raise ValueError("Only the FAISS vector store is supported in this deployment build.")
         
+        api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "OPENAI_API_KEY not found. Please set it in .env, Streamlit secrets, "
+                "or paste your key in the sidebar."
+            )
+
         # Initialize embeddings
         logger.info(f"Loading embedding model: {embedding_model}")
-        self.embeddings = OpenAIEmbeddings(model=embedding_model)
+        self.embeddings = OpenAIEmbeddings(model=embedding_model, openai_api_key=api_key)
         
         self.vector_store = None
         self.text_splitter = RecursiveCharacterTextSplitter(

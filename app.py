@@ -6,9 +6,11 @@ Enhanced UI with visualization and archaeology-specific tools.
 import os
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 
 import pandas as pd
 import streamlit as st
+from dotenv import load_dotenv
 
 from pdf_processor import PDFProcessor
 from rag_chain import ArchaeologicalRAGChain
@@ -16,11 +18,14 @@ from vector_store import VectorStoreManager
 from photo_organizer import PhotoOrganizer
 from artifact_assessment import ArtifactAssessment
 from report_generator import ReportGenerator
+from ui.copy import COPY
 from PIL import Image
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+load_dotenv()
 
 # Page configuration
 st.set_page_config(
@@ -108,13 +113,22 @@ def initialize_session_state():
         st.session_state.user_openai_api_key = ""
 
 
+def _get_openai_api_key() -> Optional[str]:
+    """Resolve OpenAI API key from session state or environment."""
+    session_key = st.session_state.get("user_openai_api_key", "").strip()
+    if session_key:
+        return session_key
+    env_key = os.getenv("OPENAI_API_KEY", "").strip()
+    return env_key or None
+
+
 def _initialize_rag_chain_with_current_key() -> bool:
     """Initialize or refresh the RAG chain using a user key (if provided) or .env key."""
     if not st.session_state.vector_store_manager:
-        st.error("No document has been indexed yet. Please upload and process a PDF first.")
+        st.error(COPY["errors"]["no_document_indexed"])
         return False
 
-    api_key = st.session_state.get("user_openai_api_key", "").strip() or None
+    api_key = _get_openai_api_key()
     try:
         rag_chain = ArchaeologicalRAGChain(
             vector_store_manager=st.session_state.vector_store_manager,
@@ -123,21 +137,19 @@ def _initialize_rag_chain_with_current_key() -> bool:
             openai_api_key=api_key,
         )
         st.session_state.rag_chain = rag_chain
-        st.success("✅ Assistant is ready — start chatting below!")
+        st.success(f"✅ {COPY['status']['assistant_ready']}")
         return True
     except Exception as e:
         st.session_state.rag_chain = None
-        st.error(f"Error initializing assistant: {str(e)}")
-        st.info(
-            "Please add a valid OpenAI API key in the sidebar (or set OPENAI_API_KEY in your .env file) and try again."
-        )
+        st.error(COPY["errors"]["assistant_init"].format(error=str(e)))
+        st.info(COPY["errors"]["api_key_invalid"])
         return False
 
 
 def process_pdf_and_create_vector_store(pdf_path: str):
     """Process PDF and create vector store."""
     try:
-        with st.spinner("📖 Reading your document..."):
+        with st.spinner(f"📖 {COPY['status']['reading_document']}"):
             # Process PDF
             processor = PDFProcessor(pdf_path)
             text_chunks = processor.process(chunk_size=1000, chunk_overlap=200)
@@ -171,7 +183,9 @@ def process_pdf_and_create_vector_store(pdf_path: str):
                         extraction_summary.append(f"{len(dates)} date(s)")
                     if sites:
                         extraction_summary.append(f"{len(sites)} site(s)")
-                    st.info(f"📊 Auto-extracted: {', '.join(extraction_summary)} from PDF")
+                    st.info(
+                        f"📊 {COPY['status']['auto_extracted'].format(summary=', '.join(extraction_summary))}"
+                    )
             except Exception as e:  # pragma: no cover
                 logger.warning(f"Auto-extraction for maps/timelines failed: {e}")
                 st.session_state.sites_df = None
@@ -179,30 +193,33 @@ def process_pdf_and_create_vector_store(pdf_path: str):
                 st.session_state.sites_list = None
             
             if not text_chunks:
-                st.error("No text could be extracted from the PDF.")
+                st.error(COPY["errors"]["no_pdf_text"])
                 return False
             
-            st.success(f"✅ Document read — found {len(text_chunks)} sections of text.")
+            st.success(
+                f"✅ {COPY['status']['document_read_sections'].format(count=len(text_chunks))}"
+            )
             
             # Create vector store
-            with st.spinner("🗂️ Indexing your document (this may take a minute)..."):
+            with st.spinner(f"🗂️ {COPY['status']['indexing_document']}"):
                 vector_store_manager = VectorStoreManager(
                     embedding_model="text-embedding-3-small",
                     vector_store_type="faiss",
-                    persist_directory="./vector_store"
+                    persist_directory="./vector_store",
+                    openai_api_key=_get_openai_api_key(),
                 )
                 vector_store_manager.create_vector_store(text_chunks)
                 st.session_state.vector_store_manager = vector_store_manager
                 st.session_state.vector_store_initialized = True
-                st.success("✅ Document indexed successfully!")
+                st.success(f"✅ {COPY['status']['document_prepared']}")
             
             # Initialize RAG chain (best effort so document processing still succeeds)
-            with st.spinner("🤖 Setting up your assistant..."):
+            with st.spinner(f"🤖 {COPY['status']['setting_up_assistant']}"):
                 _initialize_rag_chain_with_current_key()
             return True
                     
     except Exception as e:
-        st.error(f"Error processing PDF: {str(e)}")
+        st.error(COPY["errors"]["pdf_processing"].format(error=str(e)))
         return False
 
 
@@ -212,7 +229,8 @@ def load_existing_vector_store():
         vector_store_manager = VectorStoreManager(
             embedding_model="text-embedding-3-small",
             vector_store_type="faiss",
-            persist_directory="./vector_store"
+            persist_directory="./vector_store",
+            openai_api_key=_get_openai_api_key(),
         )
         vector_store_manager.load_vector_store()
         st.session_state.vector_store_manager = vector_store_manager
@@ -256,16 +274,14 @@ def _build_mode_preface(mode: str) -> str:
 def _render_sidebar():
     """Sidebar: API key, document status, and quick tools."""
     with st.sidebar:
-        st.header("🔑 OpenAI API Key")
-        st.caption(
-            "Paste your OpenAI API key for this browser session."
-        )
+        st.header(f"🔑 {COPY['sidebar']['api_key_header']}")
+        st.caption(COPY["sidebar"]["api_key_caption"])
         entered_key = st.text_input(
-            "Your OpenAI API Key",
+            COPY["sidebar"]["api_key_label"],
             type="password",
             value=st.session_state.user_openai_api_key,
-            placeholder="sk-...",
-            help="Not stored in files or database. Cleared when session ends or when you click Clear key.",
+            placeholder=COPY["sidebar"]["api_key_placeholder"],
+            help=COPY["sidebar"]["api_key_help"],
         )
         st.session_state.user_openai_api_key = entered_key
 
@@ -275,17 +291,19 @@ def _render_sidebar():
                 if st.session_state.vector_store_initialized and st.session_state.vector_store_manager:
                     _initialize_rag_chain_with_current_key()
                 else:
-                    st.success("Key saved for this session. Process or load a vector store to start chat.")
+                    st.success(COPY["sidebar"]["apply_key_saved"])
         with col_key2:
             if st.button("Clear key", use_container_width=True):
                 st.session_state.user_openai_api_key = ""
-                st.info("Session key cleared.")
+                st.info(COPY["sidebar"]["clear_key_info"])
 
         st.markdown("---")
         # Show current document name if one is loaded
         if st.session_state.vector_store_initialized:
-            st.success(f"📄 **{st.session_state.uploaded_pdf_name or 'Document'}** loaded")
-            if st.button("🔄 Load a different document", use_container_width=True):
+            st.success(
+                f"📄 **{st.session_state.uploaded_pdf_name or 'Document'}** {COPY['sidebar']['document_loaded']}"
+            )
+            if st.button(f"🔄 {COPY['sidebar']['load_different_document']}", use_container_width=True):
                 st.session_state.vector_store_initialized = False
                 st.session_state.rag_chain = None
                 st.session_state.vector_store_manager = None
@@ -294,9 +312,9 @@ def _render_sidebar():
                 st.rerun()
             st.markdown("---")
 
-        st.header("🧭 Assistant Mode")
+        st.header(f"🧭 {COPY['sidebar']['assistant_mode_header']}")
         mode = st.selectbox(
-            "What are you working on?",
+            COPY["sidebar"]["assistant_mode_label"],
             [
                 "General Q&A",
                 "Field Work & Analysis",
@@ -305,16 +323,14 @@ def _render_sidebar():
                 "Site Management",
             ],
             index=0,
-            help="Choose a category to focus the assistant's expertise on your task.",
+            help=COPY["sidebar"]["assistant_mode_help"],
         )
         st.session_state.active_mode = mode
 
-        st.caption(
-            "💡 Tip: Paste your API key above, or set OPENAI_API_KEY in .env."
-        )
+        st.caption(f"💡 {COPY['sidebar']['api_key_tip']}")
 
         st.markdown("---")
-        st.subheader("Quick Starter Questions")
+        st.subheader(COPY["sidebar"]["quick_starter_header"])
         examples = {
             "Field Work": "Help me identify this artifact and determine appropriate dating methods:",
             "Documentation": "Generate a survey methodology template for a walkover survey:",
@@ -335,14 +351,14 @@ def _render_chat_tab():
         unsafe_allow_html=True,
     )
     st.markdown(
-        '<div class="sub-header">Ask questions, analyse sites, plan surveys, and check compliance using your own archaeological documents.</div>',
+        f'<div class="sub-header">{COPY["chat"]["subheader"]}</div>',
         unsafe_allow_html=True,
     )
 
     if st.session_state.vector_store_initialized and st.session_state.rag_chain:
         # Display current mode as pills
         st.markdown(
-            f"**Active mode:** "
+            f"**{COPY['chat']['active_mode']}** "
             f"<span class='pill'>{st.session_state.active_mode}</span>",
             unsafe_allow_html=True,
         )
@@ -352,7 +368,7 @@ def _render_chat_tab():
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
                 if "sources" in message and message["sources"]:
-                    with st.expander("📖 View Sources & Locations"):
+                    with st.expander(f"📖 {COPY['chat']['view_sources']}"):
                         for source in message["sources"]:
                             st.write(f"**Source {source['index']}:**")
                             st.write(source["content"])
@@ -394,7 +410,7 @@ def _render_chat_tab():
                     st.markdown(answer)
                     
                     if sources:
-                        with st.expander("📖 View Sources & Locations"):
+                        with st.expander(f"📖 {COPY['chat']['view_sources']}"):
                             for source in sources:
                                 st.write(f"**Source {source['index']}:**")
                                 st.write(source["content"])
@@ -422,31 +438,25 @@ def _render_chat_tab():
     
     else:
         # ── Onboarding / upload screen ────────────────────────────────────────
-        st.markdown("## 👋 Welcome to the Archaeological Survey Assistant")
-        st.markdown(
-            "Upload any archaeological PDF — a survey report, excavation notes, or research paper — "
-            "and ask questions about it in plain English. No technical knowledge needed."
-        )
+        st.markdown(f"## 👋 {COPY['chat']['welcome_title']}")
+        st.markdown(COPY["chat"]["welcome_body"])
         st.markdown("---")
 
         col_upload, col_help = st.columns([3, 2], gap="large")
 
         with col_upload:
-            st.markdown("### 📄 Step 1 — Upload your document")
+            st.markdown(f"### 📄 {COPY['chat']['step1_title']}")
 
             # Warn if no API key yet
-            api_key_ok = bool(st.session_state.get("user_openai_api_key", "").strip()) or bool(os.getenv("OPENAI_API_KEY"))
+            api_key_ok = bool(_get_openai_api_key())
             if not api_key_ok:
-                st.warning(
-                    "⚠️ **Add your OpenAI API key first** — paste it in the sidebar on the left, "
-                    "then upload your document here."
-                )
+                st.warning(f"⚠️ **{COPY['chat']['api_key_warning']}**")
 
             pdf_file = st.file_uploader(
-                "Choose a PDF file (up to 200 MB)",
+                COPY["chat"]["pdf_uploader_label"],
                 type=["pdf"],
                 key="main_pdf_uploader",
-                help="Your file is only used in this session and is never stored permanently.",
+                help=COPY["chat"]["pdf_uploader_help"],
             )
 
             if pdf_file is not None:
@@ -454,9 +464,11 @@ def _render_chat_tab():
                 pdf_path = f"./temp_{pdf_file.name}"
                 with open(pdf_path, "wb") as f:
                     f.write(pdf_file.getbuffer())
-                st.success(f"✅ **{pdf_file.name}** is ready to process")
+                st.success(
+                    f"✅ {COPY['status']['pdf_ready_named'].format(name=pdf_file.name)}"
+                )
                 if st.button(
-                    "⚙️ Process Document & Start Chatting",
+                    f"⚙️ {COPY['chat']['process_button']}",
                     use_container_width=True,
                     key="main_process_btn",
                     disabled=not api_key_ok,
@@ -471,52 +483,39 @@ def _render_chat_tab():
             vector_store_path = Path("./vector_store")
             if vector_store_path.exists() and not st.session_state.vector_store_initialized:
                 st.markdown("---")
-                st.markdown("**Already processed a document before? Resume your session:**")
-                if st.button("📂 Continue from last session", use_container_width=True, key="main_load_btn"):
+                st.markdown(f"**{COPY['chat']['resume_prompt']}**")
+                if st.button(
+                    f"📂 {COPY['chat']['resume_button']}",
+                    use_container_width=True,
+                    key="main_load_btn",
+                ):
                     if load_existing_vector_store():
                         st.rerun()
                     else:
-                        st.error("Could not reload the previous session. Please upload a new document.")
+                        st.error(COPY["chat"]["resume_error"])
 
         with col_help:
-            st.markdown("### 💡 What can I ask?")
-            st.markdown(
-                """
-                Once your document is loaded, try asking:
-
-                - *"What is this document about?"*
-                - *"Which archaeological sites are mentioned?"*
-                - *"What survey methods were used?"*
-                - *"Summarise the main findings."*
-                - *"What permits or laws are discussed?"*
-                - *"Explain stratigraphy in simple terms."*
-                """
-            )
-            st.markdown("### 🔑 Need an API key?")
-            st.markdown(
-                "Get one at [platform.openai.com](https://platform.openai.com) "
-                "→ paste it in the **OpenAI API Key** field in the sidebar."
-            )
+            st.markdown(f"### 💡 {COPY['chat']['what_can_i_ask_title']}")
+            st.markdown(COPY["chat"]["what_can_i_ask_body"])
+            st.markdown(f"### 🔑 {COPY['chat']['api_key_help_title']}")
+            st.markdown(COPY["chat"]["api_key_help_body"])
 
 
 def _render_visualisations_tab():
     """Maps, timelines, and simple relationship views from tabular data."""
-    st.subheader("🌍 Interactive Site Map")
-    st.caption(
-        "If your PDF contains coordinates, the map will be pre-populated automatically. "
-        "You can also upload a CSV with `site_name`, `latitude`, `longitude`, and optional `period` columns."
-    )
+    st.subheader(f"🌍 {COPY['maps']['map_title']}")
+    st.caption(COPY["maps"]["map_caption"])
 
     auto_sites_df = st.session_state.get("sites_df")
     if auto_sites_df is not None and not auto_sites_df.empty:
-        st.markdown("**Automatically extracted from PDF:**")
+        st.markdown(f"**{COPY['maps']['map_from_pdf']}**")
         # Use site_name in map if available, otherwise show coordinates
         map_df = auto_sites_df[["latitude", "longitude"]].copy()
         if "site_name" in auto_sites_df.columns:
             # Add site_name as a column for better display
             map_df["site_name"] = auto_sites_df["site_name"].fillna("Unnamed Site")
         st.map(map_df)
-        with st.expander("View extracted site coordinates"):
+        with st.expander(COPY["maps"]["map_coords_expander"]):
             # Show site_name prominently if available
             display_cols = ["latitude", "longitude"]
             if "site_name" in auto_sites_df.columns:
@@ -526,32 +525,31 @@ def _render_visualisations_tab():
             st.dataframe(auto_sites_df[display_cols], use_container_width=True)
 
     site_file = st.file_uploader(
-        "Optionally upload additional site CSV for mapping", type=["csv"], key="map_csv"
+        COPY["maps"]["map_csv_label"], type=["csv"], key="map_csv"
     )
     if site_file is not None:
         df_sites = pd.read_csv(site_file)
         required_cols = {"latitude", "longitude"}
         if required_cols.issubset(df_sites.columns):
-            st.markdown("**From uploaded CSV:**")
+            st.markdown(f"**{COPY['maps']['map_csv_from_upload']}**")
             st.map(df_sites[["latitude", "longitude"]])
-            with st.expander("View uploaded site table"):
+            with st.expander(COPY["maps"]["map_csv_table_expander"]):
                 st.dataframe(df_sites, use_container_width=True)
         else:
             st.error(
-                f"CSV must include at least: {', '.join(required_cols)}. "
-                f"Found columns: {list(df_sites.columns)}"
+                COPY["maps"]["map_csv_error"].format(
+                    required=", ".join(required_cols),
+                    found=list(df_sites.columns),
+                )
             )
 
     st.markdown("---")
-    st.subheader("⏳ Timeline of Excavations / Surveys")
-    st.caption(
-        "If your PDF mentions years or year ranges, a basic timeline will be built automatically. "
-        "You can also upload a CSV with `site_name`, `start_year`, and optional `end_year`."
-    )
+    st.subheader(f"⏳ {COPY['maps']['timeline_title']}")
+    st.caption(COPY["maps"]["timeline_caption"])
 
     auto_time_df = st.session_state.get("timeline_df")
     if auto_time_df is not None and not auto_time_df.empty:
-        st.markdown("**Automatically extracted from PDF (labelled by context):**")
+        st.markdown(f"**{COPY['maps']['timeline_from_pdf']}**")
         try:
             import altair as alt
 
@@ -580,11 +578,11 @@ def _render_visualisations_tab():
             )
             st.altair_chart(auto_chart, use_container_width=True)
         except Exception as e:  # pragma: no cover
-            st.error(f"Could not render automatic timeline chart: {e}")
+            st.error(COPY["maps"]["timeline_chart_error"].format(error=e))
             st.dataframe(auto_time_df)
 
     timeline_file = st.file_uploader(
-        "Optionally upload additional timeline CSV", type=["csv"], key="timeline_csv"
+        COPY["maps"]["timeline_csv_label"], type=["csv"], key="timeline_csv"
     )
     if timeline_file is not None:
         df_time = pd.read_csv(timeline_file)
@@ -607,107 +605,76 @@ def _render_visualisations_tab():
                     timeline = base.mark_bar(size=12, color="#1f77b4")
                     st.altair_chart(timeline, use_container_width=True)
                 except Exception as e:  # pragma: no cover
-                    st.error(f"Could not render timeline chart: {e}")
+                    st.error(COPY["maps"]["timeline_chart_error"].format(error=e))
                     st.dataframe(df_time)
             else:
-                st.warning("No valid rows after parsing years.")
+                st.warning(COPY["maps"]["timeline_no_valid_rows"])
         else:
-            st.error(
-                "Timeline CSV must include at least `site_name` and `start_year` columns."
-            )
+            st.error(COPY["maps"]["timeline_csv_error"])
 
     st.markdown("---")
-    st.subheader("🕸️ Simple Knowledge Graph (Sites ↔ Periods)")
-    st.caption(
-        "Based on the same CSVs, you can start to think of relationships between sites, periods, and regions."
-    )
+    st.subheader(f"🕸️ {COPY['maps']['graph_title']}")
+    st.caption(COPY["maps"]["graph_caption"])
     
     # Show extracted sites if available
     sites_list = st.session_state.get("sites_list")
     if sites_list:
-        st.markdown("**Sites extracted from PDF:**")
+        st.markdown(f"**{COPY['maps']['sites_from_pdf']}**")
         sites_df_display = pd.DataFrame(sites_list)
         st.dataframe(sites_df_display[["site_name", "site_type", "context"]], use_container_width=True)
-        st.caption(f"Found {len(sites_list)} site(s) in the document")
+        st.caption(COPY["maps"]["sites_count"].format(count=len(sites_list)))
     
-    st.markdown(
-        """
-        This basic view encourages you to think in terms of **connections**:
-        - Sites linked to **periods** and **regions**
-        - Artifacts linked to **contexts** and **strata**
-
-        For a full interactive knowledge graph, you can later export your site table to tools
-        like Neo4j, Gephi, or dedicated graph-visualisation platforms.
-        """
-    )
+    st.markdown(COPY["maps"]["graph_body"])
 
 
 def _render_docs_glossary_tab():
     """Document‑oriented tools: source snippets, glossary, and highlighting helper."""
-    st.subheader("📄 Document & Source Viewer")
-    st.caption(
-        "When the assistant answers from your PDF, the **Sources** section in the chat tab shows "
-        "the exact text chunks and any page/metadata available."
-    )
+    st.subheader(f"📄 {COPY['docs_glossary']['viewer_title']}")
+    st.caption(COPY["docs_glossary"]["viewer_caption"])
 
     if st.session_state.uploaded_pdf_name:
-        st.info(f"Most recent uploaded PDF: **{st.session_state.uploaded_pdf_name}**")
+        st.info(
+            COPY["docs_glossary"]["recent_pdf"].format(
+                name=st.session_state.uploaded_pdf_name
+            )
+        )
 
-    st.markdown(
-        """
-        **Highlighting tip:**  
-        To quickly see where an answer came from:
-        1. Open the **chat tab** and expand *“View Sources & Locations”* under a message.
-        2. Look at the surrounding text and any page / chunk information.
-        3. Use that page number in your own PDF viewer to jump to the exact place.
-        """
-    )
+    st.markdown(COPY["docs_glossary"]["highlighting_tip"])
 
     st.markdown("---")
-    st.subheader("📘 Archaeological Terminology Glossary")
+    st.subheader(f"📘 {COPY['docs_glossary']['glossary_title']}")
 
-    glossary = {
-        "Context": "A discrete unit of stratigraphy representing a single event of deposition or cut.",
-        "Stratigraphy": "The study and recording of layered deposits and their relationships over time.",
-        "Feature": "A non-portable archaeological element such as a pit, ditch, wall, or hearth.",
-        "Assemblage": "A group of artifacts found together in the same context, interpreted as related.",
-        "Phase": "A group of contexts interpreted as belonging to the same broad period of activity.",
-        "Datum": "A fixed reference point used for surveying and recording elevations.",
-        "Transect": "A systematic survey line or corridor walked during field survey.",
-    }
+    glossary = COPY["docs_glossary"]["glossary"]
 
-    term = st.selectbox("Look up a term:", sorted(glossary.keys()))
+    term = st.selectbox(COPY["docs_glossary"]["glossary_lookup"], sorted(glossary.keys()))
     st.write(f"**{term}**: {glossary[term]}")
 
-    with st.expander("Show full glossary"):
+    with st.expander(COPY["docs_glossary"]["glossary_full"]):
         for k, v in glossary.items():
             st.markdown(f"- **{k}**: {v}")
 
 
 def _render_compliance_tools_tab():
     """Regulatory, methodology, reporting, and citation helpers (prompt-based)."""
-    st.subheader("⚖️ Regulatory & Compliance Helper")
-    st.caption(
-        "These tools use your documents plus general archaeological knowledge. "
-        "Always verify against current local legislation."
-    )
+    st.subheader(f"⚖️ {COPY['compliance']['title']}")
+    st.caption(COPY["compliance"]["caption"])
 
     col1, col2 = st.columns(2)
 
     with col1:
         permit_notes = st.text_area(
-            "Describe your project and location for permit guidance",
-            placeholder="e.g. fieldwalking survey near a river in [region], with planned shovel test pits...",
+            COPY["compliance"]["permit_label"],
+            placeholder=COPY["compliance"]["permit_placeholder"],
             height=120,
         )
-        if st.button("Generate permit requirement checklist") and permit_notes:
+        if st.button(COPY["compliance"]["permit_button"]) and permit_notes:
             if not (
                 st.session_state.vector_store_initialized
                 and st.session_state.rag_chain
             ):
-                st.error("Please process a PDF first so the assistant has context.")
+                st.error(COPY["errors"]["need_pdf_first"])
             else:
-                with st.spinner("Checking likely permits and legal steps..."):
+                with st.spinner(COPY["compliance"]["spinner_permits"]):
                     prompt = (
                         "You are an archaeological regulatory assistant. "
                         "Based on the following project description, outline likely permit "
@@ -720,18 +687,18 @@ def _render_compliance_tools_tab():
 
     with col2:
         report_context = st.text_area(
-            "Reporting / compliance details",
-            placeholder="Summarise your project, methods, and key findings to draft a report template...",
+            COPY["compliance"]["report_label"],
+            placeholder=COPY["compliance"]["report_placeholder"],
             height=120,
         )
-        if st.button("Draft reporting template / outline"):
+        if st.button(COPY["compliance"]["report_button"]):
             if not (
                 st.session_state.vector_store_initialized
                 and st.session_state.rag_chain
             ):
-                st.error("Please process a PDF first so the assistant has context.")
+                st.error(COPY["errors"]["need_pdf_first"])
             else:
-                with st.spinner("Drafting a structured report outline..."):
+                with st.spinner(COPY["compliance"]["spinner_report"]):
                     prompt = (
                         "Generate a structured archaeological compliance report template. "
                         "Use headings and bullet points. Tailor it to the following project context:\n\n"
@@ -741,19 +708,19 @@ def _render_compliance_tools_tab():
                     st.markdown(result["answer"])
 
     st.markdown("---")
-    st.subheader("📝 Survey Methodology Template")
+    st.subheader(f"📝 {COPY['compliance']['methodology_title']}")
     meth_context = st.text_area(
-        "Survey parameters (environment, aims, constraints)",
-        placeholder="e.g. intensive pedestrian survey over 5 km² of agricultural land...",
+        COPY["compliance"]["methodology_label"],
+        placeholder=COPY["compliance"]["methodology_placeholder"],
         height=120,
     )
-    if st.button("Generate methodology template"):
+    if st.button(COPY["compliance"]["methodology_button"]):
         if not (
             st.session_state.vector_store_initialized and st.session_state.rag_chain
         ):
-            st.error("Please process a PDF first so the assistant has context.")
+            st.error(COPY["errors"]["need_pdf_first"])
         else:
-            with st.spinner("Building a methodology template..."):
+            with st.spinner(COPY["compliance"]["spinner_methodology"]):
                 prompt = (
                     "Create a detailed survey methodology template for this project, "
                     "including sampling strategy, recording system, and data management:\n\n"
@@ -763,7 +730,7 @@ def _render_compliance_tools_tab():
                 st.markdown(result["answer"])
 
     st.markdown("---")
-    st.subheader("📝 Report Generator")
+    st.subheader(f"📝 {COPY['compliance']['report_generator_title']}")
     
     # Initialize report generator
     if 'report_generator' not in st.session_state:
@@ -776,7 +743,7 @@ def _render_compliance_tools_tab():
             st.session_state.report_generator.rag_chain = st.session_state.rag_chain
     
     report_type = st.selectbox(
-        "Report Type",
+        COPY["compliance"]["report_type_label"],
         options=list(ReportGenerator.REPORT_TYPES.keys()),
         format_func=lambda x: ReportGenerator.REPORT_TYPES[x],
         key="report_type_select"
@@ -784,8 +751,12 @@ def _render_compliance_tools_tab():
     
     # Collect project data (simplified - in production would load from data manager)
     project_data = {
-        'project_name': st.text_input("Project Name", value="Archaeological Investigation", key="report_project_name"),
-        'location': st.text_input("Location", key="report_location"),
+        'project_name': st.text_input(
+            COPY["compliance"]["project_name_label"],
+            value=COPY["compliance"]["project_name_default"],
+            key="report_project_name",
+        ),
+        'location': st.text_input(COPY["compliance"]["location_label"], key="report_location"),
         'sites': st.session_state.sites_list or [],
         'artifacts': [],  # Would load from data manager
         'methodology': {},
@@ -793,8 +764,12 @@ def _render_compliance_tools_tab():
     
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("📄 Generate Report", use_container_width=True, key="generate_report_btn"):
-            with st.spinner("Generating report..."):
+        if st.button(
+            f"📄 {COPY['compliance']['generate_report_button']}",
+            use_container_width=True,
+            key="generate_report_btn",
+        ):
+            with st.spinner(COPY["compliance"]["spinner_generating_report"]):
                 report_content = st.session_state.report_generator.generate_report(
                     report_type, project_data
                 )
@@ -802,11 +777,16 @@ def _render_compliance_tools_tab():
                 st.session_state.report_type_generated = report_type
     
     with col2:
-        if st.button("💾 Export Report", use_container_width=True, key="export_report_btn", disabled='generated_report' not in st.session_state):
+        if st.button(
+            f"💾 {COPY['compliance']['export_report_button']}",
+            use_container_width=True,
+            key="export_report_btn",
+            disabled='generated_report' not in st.session_state,
+        ):
             if 'generated_report' in st.session_state:
                 report_filename = f"{report_type}_report_{datetime.now().strftime('%Y%m%d')}.md"
                 st.download_button(
-                    "Download Report",
+                    COPY["compliance"]["download_report_button"],
                     data=st.session_state.generated_report,
                     file_name=report_filename,
                     mime="text/markdown",
@@ -814,26 +794,28 @@ def _render_compliance_tools_tab():
                 )
     
     if 'generated_report' in st.session_state:
-        st.markdown("### Generated Report Preview")
+        st.markdown(f"### {COPY['compliance']['report_preview_title']}")
         st.markdown(st.session_state.generated_report)
     
     st.markdown("---")
-    st.subheader("📚 Citation Generator")
+    st.subheader(f"📚 {COPY['compliance']['citation_title']}")
     citation_info = st.text_area(
-        "Enter bibliographic details (author, year, title, publisher, etc.)",
-        placeholder="e.g. Renfrew, C. and Bahn, P. 2016. Archaeology: Theories, Methods and Practice. London: Thames & Hudson.",
+        COPY["compliance"]["citation_label"],
+        placeholder=COPY["compliance"]["citation_placeholder"],
         height=120,
     )
     style = st.selectbox(
-        "Preferred style", ["Harvard", "Chicago", "APA", "Custom archaeological"], index=0
+        COPY["compliance"]["citation_style_label"],
+        ["Harvard", "Chicago", "APA", "Custom archaeological"],
+        index=0,
     )
-    if st.button("Format citation"):
+    if st.button(COPY["compliance"]["citation_button"]):
         if not (
             st.session_state.vector_store_initialized and st.session_state.rag_chain
         ):
-            st.error("Please process a PDF first so the assistant has context.")
+            st.error(COPY["errors"]["need_pdf_first"])
         else:
-            with st.spinner("Formatting citation..."):
+            with st.spinner(COPY["compliance"]["spinner_citation"]):
                 prompt = (
                     f"Format the following bibliographic details as a {style} style citation. "
                     f"If information is missing, clearly mark it with placeholders:\n\n"
@@ -845,63 +827,70 @@ def _render_compliance_tools_tab():
 
 def _render_photo_organizer_tab():
     """Dig Photo Organizer - auto-organize photos by trench/locus, artifact types, etc."""
-    st.subheader("📸 Dig Photo Organizer")
-    st.caption(
-        "Upload or select a directory of dig photos to automatically organize them by trench, locus, "
-        "artifact type, stratigraphy, and date. Generate field reports and find duplicates."
+    st.subheader(f"📸 {COPY['photo_organizer']['title']}")
+    st.caption(COPY["photo_organizer"]["intro"])
+
+    analyze_images = st.checkbox(
+        COPY["photo_organizer"]["analyze_checkbox"],
+        value=True,
+        help=COPY["photo_organizer"]["analyze_help"],
     )
-    
+
     # Directory input or file upload
     col1, col2 = st.columns(2)
-    
+
     with col1:
-        st.markdown("### Option 1: Scan Directory")
+        st.markdown(f"### {COPY['photo_organizer']['scan_option_title']}")
         photo_dir = st.text_input(
-            "Enter photo directory path:",
-            placeholder="C:/path/to/photos or ./photos",
-            help="Enter the full path to a directory containing photos"
+            COPY["photo_organizer"]["scan_path_label"],
+            placeholder=COPY["photo_organizer"]["scan_path_placeholder"],
+            help=COPY["photo_organizer"]["scan_path_help"],
         )
-        if st.button("Scan Directory", use_container_width=True) and photo_dir:
+        if st.button(COPY["photo_organizer"]["scan_button"], use_container_width=True) and photo_dir:
             try:
-                organizer = PhotoOrganizer(photo_dir)
-                photos = organizer.scan_directory()
+                with st.spinner(COPY["photo_organizer"]["spinner_reading"]):
+                    organizer = PhotoOrganizer(photo_dir, analyze_images=analyze_images)
+                    photos = organizer.scan_directory()
                 st.session_state.photo_organizer = organizer
-                st.success(f"Found {len(photos)} photos!")
+                st.success(COPY["photo_organizer"]["scan_success"].format(count=len(photos)))
             except Exception as e:
-                st.error(f"Error scanning directory: {e}")
-    
+                st.error(COPY["errors"]["scan_directory"].format(error=str(e)))
+
     with col2:
-        st.markdown("### Option 2: Upload Photos")
+        st.markdown(f"### {COPY['photo_organizer']['upload_option_title']}")
         uploaded_files = st.file_uploader(
-            "Upload photos",
+            COPY["photo_organizer"]["upload_label"],
             type=['jpg', 'jpeg', 'png', 'tiff', 'tif'],
             accept_multiple_files=True,
-            help="Upload multiple photos to organize"
+            help=COPY["photo_organizer"]["upload_help"],
         )
         if uploaded_files:
-            # Create temporary directory and save files
             temp_dir = Path("./temp_photos")
             temp_dir.mkdir(exist_ok=True)
             for uploaded_file in uploaded_files:
                 with open(temp_dir / uploaded_file.name, "wb") as f:
                     f.write(uploaded_file.getbuffer())
             try:
-                organizer = PhotoOrganizer(str(temp_dir))
-                photos = organizer.scan_directory()
+                with st.spinner(COPY["photo_organizer"]["spinner_reading"]):
+                    organizer = PhotoOrganizer(str(temp_dir), analyze_images=analyze_images)
+                    photos = organizer.scan_directory()
                 st.session_state.photo_organizer = organizer
-                st.success(f"Processed {len(photos)} photos!")
+                st.success(COPY["photo_organizer"]["upload_success"].format(count=len(photos)))
             except Exception as e:
-                st.error(f"Error processing photos: {e}")
+                st.error(COPY["errors"]["process_photos"].format(error=str(e)))
     
     # Display organization options
     if st.session_state.photo_organizer and st.session_state.photo_organizer.photos:
         organizer = st.session_state.photo_organizer
-        
+
+        if organizer.last_ocr_backend == 'contour-fallback':
+            st.warning(COPY["photo_organizer"]["ocr_limited_warning"])
+
         st.markdown("---")
-        st.markdown("### Organize Photos")
+        st.markdown(f"### {COPY['photo_organizer']['organize_title']}")
         
         org_method = st.radio(
-            "Organize by:",
+            COPY["photo_organizer"]["organize_label"],
             ["Trench", "Locus", "Artifact Type", "Stratigraphy Layer", "Date"],
             horizontal=True
         )
@@ -926,50 +915,109 @@ def _render_photo_organizer_tab():
                         try:
                             img = Image.open(photo['file_path'])
                             st.image(img, width='stretch', caption=photo['file_name'])
-                        except:
+                        except Exception:
                             st.text(photo['file_name'])
+                        chips = PhotoOrganizer.format_photo_chips(photo)
+                        if chips:
+                            st.caption(" · ".join(chips))
+
+                with st.expander(COPY["photo_organizer"]["detection_details"], expanded=False):
+                    for photo in photos[:12]:
+                        labels = photo.get('detected_labels') or []
+                        sources = photo.get('metadata_sources') or []
+                        st.markdown(f"**{photo['file_name']}**")
+                        if labels:
+                            for label in labels[:6]:
+                                st.markdown(f"- {label}")
+                        if sources:
+                            st.caption(f"{COPY['photo_organizer']['sources_label']} {', '.join(sources)}")
+                        if not labels and not sources:
+                            st.caption(COPY["photo_organizer"]["no_details"])
         
         st.markdown("---")
-        st.markdown("### Reports & Analysis")
+        st.markdown(f"### {COPY['photo_organizer']['reports_title']}")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("📊 Generate Field Report", use_container_width=True):
+            if st.button(
+                f"📊 {COPY['photo_organizer']['field_report_button']}",
+                use_container_width=True,
+            ):
                 report = organizer.generate_field_report()
-                st.text_area("Field Report", report, height=400)
+                st.text_area(COPY["photo_organizer"]["field_report_area_label"], report, height=400)
                 st.download_button(
-                    "Download Report",
+                    COPY["photo_organizer"]["download_report_button"],
                     data=report,
                     file_name="field_report.md",
                     mime="text/markdown"
                 )
         
         with col2:
-            if st.button("🔍 Find Duplicates", use_container_width=True):
+            if st.button(
+                f"🔍 {COPY['photo_organizer']['duplicates_button']}",
+                use_container_width=True,
+            ):
                 duplicates = organizer.find_duplicates()
                 if duplicates:
-                    st.warning(f"Found {len(duplicates)} potential duplicate groups")
+                    st.warning(
+                        COPY["photo_organizer"]["duplicates_found"].format(count=len(duplicates))
+                    )
                     for idx, group in enumerate(duplicates[:5]):  # Show first 5 groups
-                        with st.expander(f"Duplicate Group {idx + 1}"):
+                        with st.expander(
+                            COPY["photo_organizer"]["duplicate_group"].format(index=idx + 1)
+                        ):
                             for photo in group:
                                 st.text(f"- {photo['file_name']} ({photo.get('file_size', 0)} bytes)")
                 else:
-                    st.success("No duplicates found!")
+                    st.success(COPY["photo_organizer"]["no_duplicates"])
         
         # Statistics
-        with st.expander("📈 Statistics"):
+        with st.expander(f"📈 {COPY['photo_organizer']['statistics_expander']}"):
             stats = organizer.get_statistics()
             st.json(stats)
 
 
+def _render_layman_summary_sections(assessment: dict) -> None:
+    """Render structured plain-language assessment sections."""
+    sections = assessment.get('layman_summary_sections')
+    if sections:
+        intro_heading = (
+            "What we know from your description"
+            if assessment.get('input_type') == 'text'
+            else "What we see in your photo"
+        )
+        st.markdown(f"#### {intro_heading}")
+        st.markdown(sections.get('what_we_see', ''))
+
+        st.markdown("#### What this likely is")
+        st.markdown(sections.get('likely_identification', ''))
+
+        st.markdown("#### How confident we are")
+        confidence_level = sections.get('confidence_level', 'Unknown')
+        confidence_explanation = sections.get('confidence_explanation', '')
+        st.markdown(f"**{confidence_level} confidence.** {confidence_explanation}")
+
+        st.markdown("#### Why we think this")
+        st.markdown(sections.get('why_we_think_this', ''))
+
+        st.markdown("#### What to do next")
+        st.markdown(sections.get('suggested_next_steps', ''))
+        return
+
+    summary_text = (
+        assessment.get('layman_summary')
+        or assessment.get('detailed_analysis')
+        or COPY["found_something"]["no_summary"]
+    )
+    st.markdown("#### What this likely is")
+    st.markdown(summary_text)
+
+
 def _render_found_something_tab():
     """Found Something? - Artifact assessment with photo upload and text description."""
-    st.subheader("🔍 Found Something?")
-    st.caption(
-        "Upload a photo or describe what you found. Get expert assessment, identification help, "
-        "and recommendations for next steps."
-    )
+    st.subheader(f"🔍 {COPY['found_something']['title']}")
+    st.caption(COPY["found_something"]["intro"])
     
     # Initialize artifact assessor if not exists
     if st.session_state.artifact_assessor is None:
@@ -984,7 +1032,7 @@ def _render_found_something_tab():
         assessor.rag_chain = st.session_state.rag_chain
     
     input_method = st.radio(
-        "How would you like to submit your find?",
+        COPY["found_something"]["input_method_label"],
         ["📷 Photo Upload", "✍️ Text Description"],
         horizontal=True
     )
@@ -992,27 +1040,27 @@ def _render_found_something_tab():
     st.markdown("---")
     
     if input_method == "📷 Photo Upload":
-        st.markdown("### Option A: Upload Photo")
+        st.markdown(f"### {COPY['found_something']['photo_option_title']}")
         from image_analyzer import get_script_profiles
 
         script_profiles = get_script_profiles()
         uploaded_image = st.file_uploader(
-            "Upload photo of artifact",
+            COPY["found_something"]["photo_uploader_label"],
             type=['jpg', 'jpeg', 'png', 'tiff', 'tif'],
-            help="Upload a clear photo of what you found"
+            help=COPY["found_something"]["photo_uploader_help"],
         )
         
         if uploaded_image:
             image = Image.open(uploaded_image)
-            st.image(image, caption="Uploaded Image", width=400)
+            st.image(image, caption=COPY["found_something"]["uploaded_caption"], width=400)
             
             # Optional context
-            with st.expander("Add Context (Optional)"):
+            with st.expander(COPY["found_something"]["context_expander"]):
                 script_profile = st.selectbox(
-                    "Script / legend profile",
+                    COPY["found_something"]["script_profile_label"],
                     options=list(script_profiles.keys()),
                     format_func=lambda key: str(script_profiles[key]["label"]),
-                    help="Choose the script family you expect. Unsupported scripts still get enhancement plus manual review hotspots.",
+                    help=COPY["found_something"]["script_profile_help"],
                 )
                 context = {
                     'artifact_type': st.selectbox("Artifact type", ['unknown', 'coin', 'inscription', 'manuscript page', 'pottery', 'seal', 'other']),
@@ -1024,23 +1072,19 @@ def _render_found_something_tab():
                 }
                 context = {k: v for k, v in context.items() if v and v != 'unknown'}
             
-            if st.button("🔍 Assess Artifact", use_container_width=True):
-                with st.spinner("Analyzing artifact..."):
+            if st.button(f"🔍 {COPY['found_something']['assess_button']}", use_container_width=True):
+                with st.spinner(COPY["found_something"]["spinner_photo"]):
                     assessment = assessor.assess_from_photo(image, context if 'context' in locals() else None)
                     
-                    st.markdown("### Assessment Results")
-
-                    # Layman-first summary
-                    st.markdown("#### What this likely is")
-                    summary_text = assessment.get('layman_summary') or assessment.get('detailed_analysis') or "No summary available for this image yet."
-                    st.markdown(summary_text)
+                    st.markdown(f"### {COPY['found_something']['results_title']}")
+                    _render_layman_summary_sections(assessment)
 
                     # Optional deeper narrative
                     if assessment.get('detailed_analysis'):
-                        with st.expander("Read full detailed assessment"):
+                        with st.expander(COPY["found_something"]["full_assessment_expander"]):
                             st.markdown(assessment['detailed_analysis'])
                             if assessment.get('sources'):
-                                st.markdown("**Source snippets**")
+                                st.markdown(f"**{COPY['found_something']['source_snippets']}**")
                                 for source in assessment['sources'][:3]:
                                     if isinstance(source, dict):
                                         source_text = source.get('content') or source.get('page_content', '')
@@ -1052,34 +1096,43 @@ def _render_found_something_tab():
 
                     # Enhancement comparison
                     if assessment.get('visuals'):
-                        st.markdown("#### Image Enhancement Comparison")
+                        st.markdown(f"#### {COPY['found_something']['enhancement_title']}")
                         cols = st.columns(3)
                         with cols[0]:
-                            st.caption("CLAHE")
-                            st.image(assessment['visuals']['enh_clahe'], caption="Contrast enhanced")
+                            st.caption(COPY["found_something"]["enh_clahe"])
+                            st.image(
+                                assessment['visuals']['enh_clahe'],
+                                caption=COPY["found_something"]["enh_clahe_caption"],
+                            )
                         with cols[1]:
-                            st.caption("Retinex")
-                            st.image(assessment['visuals']['enh_retinex'], caption="Illumination corrected")
+                            st.caption(COPY["found_something"]["enh_retinex"])
+                            st.image(
+                                assessment['visuals']['enh_retinex'],
+                                caption=COPY["found_something"]["enh_retinex_caption"],
+                            )
                         with cols[2]:
-                            st.caption("Sharpen")
-                            st.image(assessment['visuals']['enh_sharpen'], caption="Edge-highlighted")
+                            st.caption(COPY["found_something"]["enh_sharpen"])
+                            st.image(
+                                assessment['visuals']['enh_sharpen'],
+                                caption=COPY["found_something"]["enh_sharpen_caption"],
+                            )
 
                         # Preprocessing preview
-                        with st.expander("Show preprocessing steps"):
+                        with st.expander(COPY["found_something"]["preprocessing_expander"]):
                             pcols = st.columns(3)
                             with pcols[0]:
-                                st.caption("Denoised")
+                                st.caption(COPY["found_something"]["pre_denoised"])
                                 st.image(assessment['visuals']['pre_denosed'])
                             with pcols[1]:
-                                st.caption("Shadow reduced")
+                                st.caption(COPY["found_something"]["pre_shadow"])
                                 st.image(assessment['visuals']['pre_shadow_reduced'])
                             with pcols[2]:
-                                st.caption("Normalized")
+                                st.caption(COPY["found_something"]["pre_normalized"])
                                 st.image(assessment['visuals']['pre_normalized'])
 
                     if assessment.get('similar_finds'):
-                        st.markdown("#### Similar Finds")
-                        st.caption("These are approximate matches from public collections and may include unrelated items.")
+                        st.markdown(f"#### {COPY['found_something']['similar_finds_title']}")
+                        st.caption(COPY["found_something"]["similar_finds_caption"])
                         for item in assessment['similar_finds']:
                             title = item.get('title', 'Untitled result')
                             source = item.get('source', 'External source')
@@ -1099,16 +1152,16 @@ def _render_found_something_tab():
                                 if url:
                                     st.markdown(f"[Open record]({url})")
                     else:
-                        st.caption("No similar public collection records found from the current image/context query.")
+                        st.caption(COPY["found_something"]["no_similar_finds"])
 
                     # Recommendations
-                    st.markdown("#### What to do next")
+                    st.markdown(f"#### {COPY['found_something']['recommendations_title']}")
                     for rec in assessment.get('recommendations', []):
                         st.markdown(f"- {rec}")
 
                     # Technical/advanced details
-                    with st.expander("Technical details (advanced)"):
-                        st.markdown("**Image analysis payload**")
+                    with st.expander(COPY["found_something"]["technical_expander"]):
+                        st.markdown(f"**{COPY['found_something']['technical_payload']}**")
                         st.json(assessment.get('analysis', {}))
 
                         if assessment.get('analysis', {}).get('ocr_notes'):
@@ -1116,8 +1169,11 @@ def _render_found_something_tab():
 
                         # OCR overlays and interactive zoom
                         if assessment.get('analysis', {}).get('ocr'):
-                            st.markdown("**Detected Regions & OCR**")
-                            st.image(assessment['visuals'].get('boxed', None), caption="Detected regions (numbered)")
+                            st.markdown(f"**{COPY['found_something']['detected_regions']}**")
+                            st.image(
+                                assessment['visuals'].get('boxed', None),
+                                caption=COPY["found_something"]["detected_regions_caption"],
+                            )
                             ocr_items = assessment['analysis']['ocr']
                             # Build simple table
                             import pandas as _pd
@@ -1133,10 +1189,24 @@ def _render_found_something_tab():
                             st.dataframe(table, use_container_width=True)
 
                             if assessment['analysis'].get('detected_text'):
-                                st.caption(f"Detected text summary: {assessment['analysis']['detected_text']}")
-                            st.caption(f"OCR backend: {assessment['analysis'].get('ocr_backend', 'unknown')}")
+                                st.caption(
+                                    COPY["found_something"]["detected_text_summary"].format(
+                                        text=assessment['analysis']['detected_text']
+                                    )
+                                )
+                            st.caption(
+                                COPY["found_something"]["text_reader_note"].format(
+                                    backend=assessment['analysis'].get('ocr_backend', 'unknown')
+                                )
+                            )
 
-                            selected_idx = st.number_input("Zoom region index", min_value=1, max_value=len(ocr_items), value=1, step=1)
+                            selected_idx = st.number_input(
+                                COPY["found_something"]["zoom_region_label"],
+                                min_value=1,
+                                max_value=len(ocr_items),
+                                value=1,
+                                step=1,
+                            )
                             if selected_idx:
                                 from image_analyzer import crop_box
                                 box = ocr_items[selected_idx - 1]['box']
@@ -1144,13 +1214,16 @@ def _render_found_something_tab():
                                 st.image(zoom, caption=f"Zoomed region #{selected_idx}")
                                 candidates = ocr_items[selected_idx - 1].get('top_candidates', [])
                                 if candidates:
-                                    st.markdown("**Suggested readings**")
+                                    st.markdown(f"**{COPY['found_something']['suggested_readings']}**")
                                     for candidate in candidates:
                                         st.markdown(f"- {candidate}")
 
                                 # Manual correction feedback
-                                correction = st.text_input("Suggest transcription / reading for this region")
-                                if st.button("Save correction", key=f"save_corr_{selected_idx}"):
+                                correction = st.text_input(COPY["found_something"]["correction_label"])
+                                if st.button(
+                                    COPY["found_something"]["save_correction_button"],
+                                    key=f"save_corr_{selected_idx}",
+                                ):
                                     import json, os
                                     os.makedirs("user_data", exist_ok=True)
                                     corr_path = os.path.join("user_data", "corrections.json")
@@ -1172,11 +1245,11 @@ def _render_found_something_tab():
                                     data.append(entry)
                                     with open(corr_path, "w", encoding="utf-8") as f:
                                         json.dump(data, f, ensure_ascii=False, indent=2)
-                                    st.success("Correction saved. Thanks for the feedback!")
+                                    st.success(COPY["found_something"]["correction_saved"])
     
     else:  # Text Description
-        st.markdown("### Option B: Text Description")
-        st.caption("Answer the guided questions to describe what you found")
+        st.markdown(f"### {COPY['found_something']['text_option_title']}")
+        st.caption(COPY["found_something"]["text_option_caption"])
         
         template = assessor.get_guided_questions_template()
         description = {}
@@ -1206,7 +1279,7 @@ def _render_found_something_tab():
         description['markings'] = st.text_area(
             template['markings']['question'],
             key="desc_markings",
-            help="Describe any markings, inscriptions, or decorative elements"
+            help=COPY["found_something"]["markings_help"],
         )
         
         # Additional notes (optional)
@@ -1216,23 +1289,24 @@ def _render_found_something_tab():
             height=100
         )
         
-        if st.button("🔍 Assess Artifact", use_container_width=True):
-            with st.spinner("Analyzing artifact description..."):
+        if st.button(f"🔍 {COPY['found_something']['assess_button']}", use_container_width=True):
+            with st.spinner(COPY["found_something"]["spinner_text"]):
                 assessment = assessor.assess_from_text(description, st.session_state.rag_chain if st.session_state.vector_store_initialized else None)
                 
-                st.markdown("### Assessment Results")
-                
-                # Description summary
-                st.markdown("#### Your Description")
+                st.markdown(f"### {COPY['found_something']['results_title']}")
+
+                st.markdown(f"#### {COPY['found_something']['your_description']}")
                 st.markdown(assessment['analysis'].get('full_description', ''))
+
+                _render_layman_summary_sections(assessment)
                 
                 # Detailed assessment
                 if assessment.get('detailed_analysis'):
-                    st.markdown("#### Detailed Assessment")
+                    st.markdown(f"#### {COPY['found_something']['detailed_assessment']}")
                     st.markdown(assessment['detailed_analysis'])
                     
                     if assessment.get('sources'):
-                        with st.expander("📖 View Sources"):
+                        with st.expander(f"📖 {COPY['found_something']['view_sources']}"):
                             for source in assessment['sources'][:3]:
                                 if isinstance(source, dict):
                                     source_text = source.get('content') or source.get('page_content', '')
@@ -1243,7 +1317,7 @@ def _render_found_something_tab():
                                 st.text(source_text[:500])
                 
                 # Recommendations
-                st.markdown("#### Recommendations")
+                st.markdown(f"#### {COPY['found_something']['recommendations']}")
                 for rec in assessment.get('recommendations', []):
                     st.markdown(f"- {rec}")
 
