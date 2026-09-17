@@ -6,10 +6,19 @@ Also supports simple extraction of coordinates and dates for visualisations.
 
 import logging
 import re
-from typing import List, Dict
+import time
+from typing import List, Dict, Optional, Union
 
 import pdfplumber
 import PyPDF2
+
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:
+    try:
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+    except ImportError:
+        RecursiveCharacterTextSplitter = None  # type: ignore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,33 +31,89 @@ class PDFProcessor:
         self.pdf_path = pdf_path
         self.text_chunks: List[str] = []
         self.full_text: str = ""
+        self.page_count: int = 0
+
+    @staticmethod
+    def _normalize_extracted_text(text: str) -> str:
+        """Clean extracted PDF text for chunking and search."""
+        if not text:
+            return ""
+        text = text.replace("\x00", "")
+        text = re.sub(r"[ \t]{3,}", "  ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    @staticmethod
+    def _format_table(table: List[List[Optional[str]]]) -> str:
+        """Format a pdfplumber table as readable pipe-separated rows."""
+        if not table:
+            return ""
+        rows = []
+        for row in table:
+            cells = [(cell or "").strip().replace("\n", " ") for cell in row]
+            if any(cells):
+                rows.append(" | ".join(cells))
+        return "\n".join(rows)
+
+    def _extract_page_content(self, page, page_number: int) -> str:
+        """Extract body text and tables from one PDF page."""
+        sections: List[str] = []
+        text = page.extract_text(x_tolerance=2, y_tolerance=2) or ""
+        if text.strip():
+            sections.append(text.strip())
+
+        try:
+            tables = page.extract_tables() or []
+        except Exception as exc:
+            logger.debug(f"Table extraction failed on page {page_number}: {exc}")
+            tables = []
+
+        for index, table in enumerate(tables, start=1):
+            formatted = self._format_table(table)
+            if formatted:
+                sections.append(f"[Table {index}]\n{formatted}")
+
+        if not sections:
+            return ""
+        return f"--- Page {page_number} ---\n\n" + "\n\n".join(sections)
 
     def extract_text_pdfplumber(self) -> str:
         """Extract text using pdfplumber (better for complex layouts)."""
+        started = time.perf_counter()
         full_text = ""
         try:
             with pdfplumber.open(self.pdf_path) as pdf:
-                logger.info(f"Processing PDF with {len(pdf.pages)} pages")
-                for i, page in enumerate(pdf.pages):
-                    text = page.extract_text()
-                    if text:
-                        full_text += f"\n\n--- Page {i+1} ---\n\n{text}"
-                    logger.info(f"Extracted text from page {i+1}")
+                self.page_count = len(pdf.pages)
+                logger.info(f"Processing PDF with {self.page_count} pages")
+                for i, page in enumerate(pdf.pages, start=1):
+                    page_text = self._extract_page_content(page, i)
+                    if page_text:
+                        full_text += f"\n\n{page_text}"
+                    logger.info(f"Extracted text from page {i}")
         except Exception as e:
             logger.error(f"Error with pdfplumber: {e}")
-            # Fallback to PyPDF2
             return self.extract_text_pypdf2()
 
+        full_text = self._normalize_extracted_text(full_text)
         self.full_text = full_text
+        elapsed = time.perf_counter() - started
+        logger.info(
+            "pdfplumber extracted %s chars from %s pages in %.2fs",
+            len(full_text),
+            self.page_count,
+            elapsed,
+        )
         return full_text
 
     def extract_text_pypdf2(self) -> str:
         """Extract text using PyPDF2 (fallback method)."""
         full_text = ""
+        page_count = 0
         try:
             with open(self.pdf_path, "rb") as file:
                 pdf_reader = PyPDF2.PdfReader(file)
-                logger.info(f"Processing PDF with {len(pdf_reader.pages)} pages")
+                page_count = len(pdf_reader.pages)
+                logger.info(f"Processing PDF with {page_count} pages")
                 for i, page in enumerate(pdf_reader.pages):
                     text = page.extract_text()
                     if text:
@@ -58,7 +123,9 @@ class PDFProcessor:
             logger.error(f"Error with PyPDF2: {e}")
             raise
 
+        full_text = self._normalize_extracted_text(full_text)
         self.full_text = full_text
+        self.page_count = page_count
         return full_text
 
     def extract_text(self) -> str:
@@ -69,65 +136,54 @@ class PDFProcessor:
             logger.warning(f"pdfplumber failed, trying PyPDF2: {e}")
             return self.extract_text_pypdf2()
 
+    @staticmethod
+    def split_text_chunks(
+        text: str,
+        chunk_size: int = 1000,
+        chunk_overlap: int = 200,
+    ) -> List[str]:
+        """Split text with RecursiveCharacterTextSplitter (safe on delimiter-poor text)."""
+        if not text:
+            return []
+        if RecursiveCharacterTextSplitter is None:
+            raise ImportError(
+                "RecursiveCharacterTextSplitter not available. "
+                "Install langchain-text-splitters."
+            )
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            length_function=len,
+        )
+        chunks = splitter.split_text(text)
+        logger.info("Created %s text chunks", len(chunks))
+        return chunks
+
     def chunk_text(
         self, text: str, chunk_size: int = 1000, chunk_overlap: int = 200
     ) -> List[str]:
+        """Backward-compatible alias for split_text_chunks."""
+        return self.split_text_chunks(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+
+    def process(self, chunk_size: int = 1000, chunk_overlap: int = 200) -> str:
         """
-        Split text into chunks for embedding.
+        Process PDF and return normalized full text for downstream chunking.
 
-        Args:
-            text: Full text content
-            chunk_size: Maximum characters per chunk
-            chunk_overlap: Overlap between chunks to maintain context
-
-        Returns:
-            List of text chunks
+        Chunking for embeddings happens in VectorStoreManager.create_vector_store().
+        chunk_size and chunk_overlap are kept for API compatibility but ignored here.
         """
-        if not text:
-            return []
-
-        chunks: List[str] = []
-        start = 0
-        text_length = len(text)
-
-        while start < text_length:
-            end = start + chunk_size
-
-            # Try to break at sentence boundary
-            if end < text_length:
-                # Look for sentence endings near the chunk boundary
-                for delimiter in [". ", ".\n", "! ", "!\n", "? ", "?\n", "\n\n"]:
-                    last_occurrence = text.rfind(delimiter, start, end)
-                    if last_occurrence != -1:
-                        end = last_occurrence + len(delimiter)
-                        break
-
-            chunk = text[start:end].strip()
-            if chunk:
-                chunks.append(chunk)
-
-            # Move start position with overlap
-            start = end - chunk_overlap
-            if start >= text_length:
-                break
-
-        logger.info(f"Created {len(chunks)} text chunks")
-        return chunks
-
-    def process(self, chunk_size: int = 1000, chunk_overlap: int = 200) -> List[str]:
-        """
-        Process PDF and return text chunks.
-
-        Args:
-            chunk_size: Maximum characters per chunk
-            chunk_overlap: Overlap between chunks
-
-        Returns:
-            List of text chunks ready for embedding
-        """
+        started = time.perf_counter()
         text = self.extract_text()
-        self.text_chunks = self.chunk_text(text, chunk_size, chunk_overlap)
-        return self.text_chunks
+        self.full_text = text
+        self.text_chunks = []
+        elapsed = time.perf_counter() - started
+        logger.info(
+            "PDF process complete: %s chars, %s pages, %.2fs",
+            len(text),
+            self.page_count,
+            elapsed,
+        )
+        return text
 
     # ------------------------------------------------------------------
     # Lightweight structured extraction helpers for maps & timelines

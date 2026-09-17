@@ -37,13 +37,15 @@ def setup_vector_store(pdf_path: str):
     # Process PDF
     logger.info("Step 1: Processing PDF...")
     processor = PDFProcessor(pdf_path)
-    text_chunks = processor.process(chunk_size=1000, chunk_overlap=200)
+    full_text = processor.process()
     
-    if not text_chunks:
+    if not full_text.strip():
         logger.error("No text could be extracted from the PDF.")
         return False
     
-    logger.info(f"✓ Extracted {len(text_chunks)} text chunks from PDF")
+    logger.info(
+        f"✓ Extracted {len(full_text)} characters from {processor.page_count} page(s)"
+    )
     
     # Create vector store
     logger.info("Step 2: Creating vector embeddings...")
@@ -52,8 +54,8 @@ def setup_vector_store(pdf_path: str):
         vector_store_type="faiss",
         persist_directory="./vector_store"
     )
-    vector_store_manager.create_vector_store(text_chunks)
-    logger.info("✓ Vector store created successfully!")
+    chunk_count = vector_store_manager.create_vector_store(full_text)
+    logger.info(f"✓ Vector store created successfully with {chunk_count} chunks!")
     
     return True
 

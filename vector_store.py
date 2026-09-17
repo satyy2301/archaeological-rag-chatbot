@@ -4,7 +4,8 @@ Creates and manages embeddings and vector database
 """
 
 import os
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Union
+import time
 from langchain_openai import OpenAIEmbeddings
 try:
     from langchain_community.vectorstores import FAISS
@@ -76,29 +77,50 @@ class VectorStoreManager:
             length_function=len,
         )
     
-    def create_vector_store(self, texts: List[str], metadata: Optional[List[Dict]] = None):
+    def create_vector_store(
+        self,
+        texts: Union[str, List[str]],
+        metadata: Optional[List[Dict]] = None,
+        already_chunked: bool = False,
+    ) -> int:
         """
-        Create vector store from text chunks
-        
+        Create vector store from full text or pre-chunked strings.
+
         Args:
-            texts: List of text chunks
-            metadata: Optional metadata for each chunk
+            texts: Full document text, or list of page/chunk strings
+            metadata: Optional metadata for each input document
+            already_chunked: When True, skip RecursiveCharacterTextSplitter
+
+        Returns:
+            Number of embedded chunks written to the vector store
         """
-        if not texts:
-            raise ValueError("No texts provided for vector store creation")
-        
-        logger.info(f"Creating vector store from {len(texts)} text chunks")
-        
-        # Create Document objects
+        if isinstance(texts, str):
+            if not texts.strip():
+                raise ValueError("No texts provided for vector store creation")
+            text_list = [texts]
+        else:
+            text_list = [text for text in texts if text and str(text).strip()]
+            if not text_list:
+                raise ValueError("No texts provided for vector store creation")
+
+        started = time.perf_counter()
+        logger.info(
+            "Creating vector store from %s input document(s), already_chunked=%s",
+            len(text_list),
+            already_chunked,
+        )
+
         documents = []
-        for i, text in enumerate(texts):
+        for i, text in enumerate(text_list):
             doc_metadata = metadata[i] if metadata and i < len(metadata) else {}
             doc_metadata['chunk_index'] = i
             documents.append(Document(page_content=text, metadata=doc_metadata))
-        
-        # Split documents if needed
-        split_docs = self.text_splitter.split_documents(documents)
-        logger.info(f"Split into {len(split_docs)} documents")
+
+        if already_chunked:
+            split_docs = documents
+        else:
+            split_docs = self.text_splitter.split_documents(documents)
+        logger.info("Split into %s embedding chunks", len(split_docs))
         
         # Create vector store in batches to reduce memory spikes on Cloud deploys
         batch_size = 48
@@ -119,7 +141,14 @@ class VectorStoreManager:
                 )
 
         self.vector_store.save_local(self.persist_directory)
-        logger.info(f"FAISS vector store saved to {self.persist_directory}")
+        elapsed = time.perf_counter() - started
+        logger.info(
+            "FAISS vector store saved to %s (%s chunks, %.2fs)",
+            self.persist_directory,
+            len(split_docs),
+            elapsed,
+        )
+        return len(split_docs)
     
     def load_vector_store(self):
         """Load existing vector store from disk"""

@@ -4,6 +4,7 @@ Enhanced UI with visualization and archaeology-specific tools.
 """
 
 import os
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -151,75 +152,84 @@ def _initialize_rag_chain_with_current_key() -> bool:
 def process_pdf_and_create_vector_store(pdf_path: str):
     """Process PDF and create vector store."""
     try:
+        pipeline_started = time.perf_counter()
+        processor = PDFProcessor(pdf_path)
+
         with st.spinner(f"📖 {COPY['status']['reading_document']}"):
-            # Process PDF
-            processor = PDFProcessor(pdf_path)
-            text_chunks = processor.process(chunk_size=1000, chunk_overlap=200)
+            extract_started = time.perf_counter()
+            full_text = processor.process()
+            extract_elapsed = time.perf_counter() - extract_started
+            logger.info(
+                "PDF extract: %s chars, %s pages, %.2fs",
+                len(full_text),
+                processor.page_count,
+                extract_elapsed,
+            )
 
-            # Automatic extraction of coordinates, dates, and sites for visualisations
-            try:
-                coords = processor.extract_coordinates()
-                dates = processor.extract_dates()
-                sites = processor.extract_sites()
-
-                if coords:
-                    st.session_state.sites_df = pd.DataFrame(coords)
-                else:
-                    st.session_state.sites_df = None
-
-                if dates:
-                    st.session_state.timeline_df = pd.DataFrame(dates)
-                else:
-                    st.session_state.timeline_df = None
-                
-                if sites:
-                    st.session_state.sites_list = sites
-                else:
-                    st.session_state.sites_list = None
-                    
-                if coords or dates or sites:
-                    extraction_summary = []
-                    if coords:
-                        extraction_summary.append(f"{len(coords)} coordinate(s)")
-                    if dates:
-                        extraction_summary.append(f"{len(dates)} date(s)")
-                    if sites:
-                        extraction_summary.append(f"{len(sites)} site(s)")
-                    st.info(
-                        f"📊 {COPY['status']['auto_extracted'].format(summary=', '.join(extraction_summary))}"
-                    )
-            except Exception as e:  # pragma: no cover
-                logger.warning(f"Auto-extraction for maps/timelines failed: {e}")
-                st.session_state.sites_df = None
-                st.session_state.timeline_df = None
-                st.session_state.sites_list = None
-            
-            if not text_chunks:
+            if not full_text.strip():
                 st.error(COPY["errors"]["no_pdf_text"])
                 return False
-            
+
             st.success(
-                f"✅ {COPY['status']['document_read_sections'].format(count=len(text_chunks))}"
+                f"✅ {COPY['status']['document_read_sections'].format(count=processor.page_count or 1)}"
             )
-            
-            # Create vector store
-            with st.spinner(f"🗂️ {COPY['status']['indexing_document']}"):
-                vector_store_manager = VectorStoreManager(
-                    embedding_model="text-embedding-3-small",
-                    vector_store_type="faiss",
-                    persist_directory="./vector_store",
-                    openai_api_key=_get_openai_api_key(),
+
+        with st.spinner(f"🗂️ {COPY['status']['indexing_document']}"):
+            index_started = time.perf_counter()
+            vector_store_manager = VectorStoreManager(
+                embedding_model="text-embedding-3-small",
+                vector_store_type="faiss",
+                persist_directory="./vector_store",
+                openai_api_key=_get_openai_api_key(),
+            )
+            chunk_count = vector_store_manager.create_vector_store(full_text)
+            index_elapsed = time.perf_counter() - index_started
+            logger.info("PDF index: %s chunks, %.2fs", chunk_count, index_elapsed)
+            st.session_state.vector_store_manager = vector_store_manager
+            st.session_state.vector_store_initialized = True
+            st.success(f"✅ {COPY['status']['document_prepared']}")
+
+        with st.spinner(f"🤖 {COPY['status']['setting_up_assistant']}"):
+            _initialize_rag_chain_with_current_key()
+
+        try:
+            map_started = time.perf_counter()
+            coords = processor.extract_coordinates()
+            dates = processor.extract_dates()
+            sites = processor.extract_sites()
+            logger.info(
+                "PDF map/timeline extract: %.2fs",
+                time.perf_counter() - map_started,
+            )
+
+            st.session_state.sites_df = pd.DataFrame(coords) if coords else None
+            st.session_state.timeline_df = pd.DataFrame(dates) if dates else None
+            st.session_state.sites_list = sites if sites else None
+
+            if coords or dates or sites:
+                extraction_summary = []
+                if coords:
+                    extraction_summary.append(f"{len(coords)} coordinate(s)")
+                if dates:
+                    extraction_summary.append(f"{len(dates)} date(s)")
+                if sites:
+                    extraction_summary.append(f"{len(sites)} site(s)")
+                st.info(
+                    f"📊 {COPY['status']['auto_extracted'].format(summary=', '.join(extraction_summary))}"
                 )
-                vector_store_manager.create_vector_store(text_chunks)
-                st.session_state.vector_store_manager = vector_store_manager
-                st.session_state.vector_store_initialized = True
-                st.success(f"✅ {COPY['status']['document_prepared']}")
-            
-            # Initialize RAG chain (best effort so document processing still succeeds)
-            with st.spinner(f"🤖 {COPY['status']['setting_up_assistant']}"):
-                _initialize_rag_chain_with_current_key()
-            return True
-                    
+        except Exception as e:  # pragma: no cover
+            logger.warning(f"Auto-extraction for maps/timelines failed: {e}")
+            st.session_state.sites_df = None
+            st.session_state.timeline_df = None
+            st.session_state.sites_list = None
+
+        logger.info(
+            "PDF pipeline complete in %.2fs (%s embedding chunks)",
+            time.perf_counter() - pipeline_started,
+            chunk_count,
+        )
+        return True
+
     except Exception as e:
         st.error(COPY["errors"]["pdf_processing"].format(error=str(e)))
         return False
