@@ -19,6 +19,8 @@ from photo_organizer import PhotoOrganizer
 from artifact_assessment import ArtifactAssessment
 from report_generator import ReportGenerator
 from ui.copy import COPY
+from deploy_utils import is_streamlit_cloud
+from image_analyzer import is_easyocr_available, is_easyocr_initialized
 from PIL import Image
 import logging
 
@@ -287,13 +289,13 @@ def _render_sidebar():
 
         col_key1, col_key2 = st.columns(2)
         with col_key1:
-            if st.button("Apply key", use_container_width=True):
+            if st.button("Apply key", width="stretch"):
                 if st.session_state.vector_store_initialized and st.session_state.vector_store_manager:
                     _initialize_rag_chain_with_current_key()
                 else:
                     st.success(COPY["sidebar"]["apply_key_saved"])
         with col_key2:
-            if st.button("Clear key", use_container_width=True):
+            if st.button("Clear key", width="stretch"):
                 st.session_state.user_openai_api_key = ""
                 st.info(COPY["sidebar"]["clear_key_info"])
 
@@ -303,7 +305,7 @@ def _render_sidebar():
             st.success(
                 f"📄 **{st.session_state.uploaded_pdf_name or 'Document'}** {COPY['sidebar']['document_loaded']}"
             )
-            if st.button(f"🔄 {COPY['sidebar']['load_different_document']}", use_container_width=True):
+            if st.button(f"🔄 {COPY['sidebar']['load_different_document']}", width="stretch"):
                 st.session_state.vector_store_initialized = False
                 st.session_state.rag_chain = None
                 st.session_state.vector_store_manager = None
@@ -469,7 +471,7 @@ def _render_chat_tab():
                 )
                 if st.button(
                     f"⚙️ {COPY['chat']['process_button']}",
-                    use_container_width=True,
+                    width="stretch",
                     key="main_process_btn",
                     disabled=not api_key_ok,
                 ):
@@ -486,7 +488,7 @@ def _render_chat_tab():
                 st.markdown(f"**{COPY['chat']['resume_prompt']}**")
                 if st.button(
                     f"📂 {COPY['chat']['resume_button']}",
-                    use_container_width=True,
+                    width="stretch",
                     key="main_load_btn",
                 ):
                     if load_existing_vector_store():
@@ -522,7 +524,7 @@ def _render_visualisations_tab():
                 display_cols = ["site_name"] + display_cols
             if "context" in auto_sites_df.columns:
                 display_cols.append("context")
-            st.dataframe(auto_sites_df[display_cols], use_container_width=True)
+            st.dataframe(auto_sites_df[display_cols], width="stretch")
 
     site_file = st.file_uploader(
         COPY["maps"]["map_csv_label"], type=["csv"], key="map_csv"
@@ -534,7 +536,7 @@ def _render_visualisations_tab():
             st.markdown(f"**{COPY['maps']['map_csv_from_upload']}**")
             st.map(df_sites[["latitude", "longitude"]])
             with st.expander(COPY["maps"]["map_csv_table_expander"]):
-                st.dataframe(df_sites, use_container_width=True)
+                st.dataframe(df_sites, width="stretch")
         else:
             st.error(
                 COPY["maps"]["map_csv_error"].format(
@@ -576,7 +578,7 @@ def _render_visualisations_tab():
                 )
                 .mark_bar(size=10, color="#1f77b4")
             )
-            st.altair_chart(auto_chart, use_container_width=True)
+            st.altair_chart(auto_chart, width="stretch")
         except Exception as e:  # pragma: no cover
             st.error(COPY["maps"]["timeline_chart_error"].format(error=e))
             st.dataframe(auto_time_df)
@@ -603,7 +605,7 @@ def _render_visualisations_tab():
                         tooltip=["site_name", "start_year", "end_year"],
                     )
                     timeline = base.mark_bar(size=12, color="#1f77b4")
-                    st.altair_chart(timeline, use_container_width=True)
+                    st.altair_chart(timeline, width="stretch")
                 except Exception as e:  # pragma: no cover
                     st.error(COPY["maps"]["timeline_chart_error"].format(error=e))
                     st.dataframe(df_time)
@@ -621,7 +623,7 @@ def _render_visualisations_tab():
     if sites_list:
         st.markdown(f"**{COPY['maps']['sites_from_pdf']}**")
         sites_df_display = pd.DataFrame(sites_list)
-        st.dataframe(sites_df_display[["site_name", "site_type", "context"]], use_container_width=True)
+        st.dataframe(sites_df_display[["site_name", "site_type", "context"]], width="stretch")
         st.caption(COPY["maps"]["sites_count"].format(count=len(sites_list)))
     
     st.markdown(COPY["maps"]["graph_body"])
@@ -766,7 +768,7 @@ def _render_compliance_tools_tab():
     with col1:
         if st.button(
             f"📄 {COPY['compliance']['generate_report_button']}",
-            use_container_width=True,
+            width="stretch",
             key="generate_report_btn",
         ):
             with st.spinner(COPY["compliance"]["spinner_generating_report"]):
@@ -779,7 +781,7 @@ def _render_compliance_tools_tab():
     with col2:
         if st.button(
             f"💾 {COPY['compliance']['export_report_button']}",
-            use_container_width=True,
+            width="stretch",
             key="export_report_btn",
             disabled='generated_report' not in st.session_state,
         ):
@@ -825,6 +827,38 @@ def _render_compliance_tools_tab():
                 st.markdown(result["answer"])
 
 
+def _scan_photos_with_progress(photo_directory: str, analyze_images: bool):
+    """Scan photos and show per-file progress in the UI."""
+    organizer = PhotoOrganizer(photo_directory, analyze_images=analyze_images)
+    progress = st.progress(0.0)
+    status = st.empty()
+    first_ocr_notice = st.empty()
+
+    def _on_progress(current: int, total: int, filename: str) -> None:
+        fraction = current / total if total else 1.0
+        progress.progress(fraction)
+        status.caption(
+            COPY["photo_organizer"]["progress_photo"].format(
+                current=current,
+                total=total,
+                filename=filename,
+            )
+        )
+        if (
+            analyze_images
+            and is_easyocr_available()
+            and not is_easyocr_initialized()
+            and current == 1
+        ):
+            first_ocr_notice.info(COPY["photo_organizer"]["spinner_ocr_first_run"])
+
+    photos = organizer.scan_directory(progress_callback=_on_progress)
+    progress.empty()
+    status.empty()
+    first_ocr_notice.empty()
+    return organizer, photos
+
+
 def _render_photo_organizer_tab():
     """Dig Photo Organizer - auto-organize photos by trench/locus, artifact types, etc."""
     st.subheader(f"📸 {COPY['photo_organizer']['title']}")
@@ -835,6 +869,8 @@ def _render_photo_organizer_tab():
         value=True,
         help=COPY["photo_organizer"]["analyze_help"],
     )
+    if analyze_images and is_streamlit_cloud() and is_easyocr_available():
+        st.caption(COPY["photo_organizer"]["ocr_cloud_note"])
 
     # Directory input or file upload
     col1, col2 = st.columns(2)
@@ -846,11 +882,9 @@ def _render_photo_organizer_tab():
             placeholder=COPY["photo_organizer"]["scan_path_placeholder"],
             help=COPY["photo_organizer"]["scan_path_help"],
         )
-        if st.button(COPY["photo_organizer"]["scan_button"], use_container_width=True) and photo_dir:
+        if st.button(COPY["photo_organizer"]["scan_button"], width="stretch") and photo_dir:
             try:
-                with st.spinner(COPY["photo_organizer"]["spinner_reading"]):
-                    organizer = PhotoOrganizer(photo_dir, analyze_images=analyze_images)
-                    photos = organizer.scan_directory()
+                organizer, photos = _scan_photos_with_progress(photo_dir, analyze_images)
                 st.session_state.photo_organizer = organizer
                 st.success(COPY["photo_organizer"]["scan_success"].format(count=len(photos)))
             except Exception as e:
@@ -871,9 +905,7 @@ def _render_photo_organizer_tab():
                 with open(temp_dir / uploaded_file.name, "wb") as f:
                     f.write(uploaded_file.getbuffer())
             try:
-                with st.spinner(COPY["photo_organizer"]["spinner_reading"]):
-                    organizer = PhotoOrganizer(str(temp_dir), analyze_images=analyze_images)
-                    photos = organizer.scan_directory()
+                organizer, photos = _scan_photos_with_progress(str(temp_dir), analyze_images)
                 st.session_state.photo_organizer = organizer
                 st.success(COPY["photo_organizer"]["upload_success"].format(count=len(photos)))
             except Exception as e:
@@ -942,7 +974,7 @@ def _render_photo_organizer_tab():
         with col1:
             if st.button(
                 f"📊 {COPY['photo_organizer']['field_report_button']}",
-                use_container_width=True,
+                width="stretch",
             ):
                 report = organizer.generate_field_report()
                 st.text_area(COPY["photo_organizer"]["field_report_area_label"], report, height=400)
@@ -956,7 +988,7 @@ def _render_photo_organizer_tab():
         with col2:
             if st.button(
                 f"🔍 {COPY['photo_organizer']['duplicates_button']}",
-                use_container_width=True,
+                width="stretch",
             ):
                 duplicates = organizer.find_duplicates()
                 if duplicates:
@@ -1072,7 +1104,7 @@ def _render_found_something_tab():
                 }
                 context = {k: v for k, v in context.items() if v and v != 'unknown'}
             
-            if st.button(f"🔍 {COPY['found_something']['assess_button']}", use_container_width=True):
+            if st.button(f"🔍 {COPY['found_something']['assess_button']}", width="stretch"):
                 with st.spinner(COPY["found_something"]["spinner_photo"]):
                     assessment = assessor.assess_from_photo(image, context if 'context' in locals() else None)
                     
@@ -1186,7 +1218,7 @@ def _render_found_something_tab():
                                 }
                                 for i, item in enumerate(ocr_items)
                             ])
-                            st.dataframe(table, use_container_width=True)
+                            st.dataframe(table, width="stretch")
 
                             if assessment['analysis'].get('detected_text'):
                                 st.caption(
@@ -1289,7 +1321,7 @@ def _render_found_something_tab():
             height=100
         )
         
-        if st.button(f"🔍 {COPY['found_something']['assess_button']}", use_container_width=True):
+        if st.button(f"🔍 {COPY['found_something']['assess_button']}", width="stretch"):
             with st.spinner(COPY["found_something"]["spinner_text"]):
                 assessment = assessor.assess_from_text(description, st.session_state.rag_chain if st.session_state.vector_store_initialized else None)
                 

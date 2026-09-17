@@ -170,8 +170,17 @@ This repo includes deployment helpers:
 - `packages.txt` for required Linux system libraries used by OpenCV/EasyOCR
 - `.streamlit/config.toml` for Streamlit runtime settings
 - `.streamlit/secrets.toml.example` for optional fallback secret format
+- `deploy_utils.py` for cloud-aware runtime behavior
+- CPU-only `torch`/`torchvision` pins in `requirements.txt` (avoids CUDA wheels on Cloud)
 
 For Streamlit Community Cloud, keep `packages.txt` minimal. Avoid pinning distro-specific libraries that may not exist on Streamlit's current base image.
+
+### Cloud performance notes
+- Use **Python 3.11** in Streamlit Cloud advanced settings when available (more stable than bleeding-edge runtimes).
+- EasyOCR models download once per session on first photo with text reading enabled (~30–60 seconds).
+- Photo organizer skips OCR when filename metadata already includes trench, locus, artifact type, and context.
+- The `vector_store/` folder is ephemeral on Cloud; upload and index your PDF each session unless you add external storage.
+- For local GPU development, see `requirements-dev.txt` for optional CUDA torch install notes.
 
 ### API Key Entry
 - The app supports session-level key entry in the sidebar.
@@ -210,6 +219,11 @@ Without this key, the app still uses public sources that do not require authenti
 ### Streamlit Cloud dependency install errors
 - If the build fails while processing `packages.txt`, remove nonessential or distro-specific apt packages and redeploy
 - This repository intentionally uses a minimal `packages.txt` to stay compatible with Streamlit Community Cloud's Linux image
+- `requirements.txt` pins CPU-only PyTorch wheels to keep install size and memory use lower on Cloud
+
+### App restarts or health check failures during PDF indexing
+- Large PDFs are indexed in batches to reduce memory spikes
+- If the app still restarts, try a smaller PDF first or wait for indexing to finish before using photo OCR in the same session
 
 ### Vector Store Issues
 - Delete the `vector_store/` directory and reprocess the PDF

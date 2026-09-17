@@ -14,10 +14,8 @@ source ../venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Optional OCR upgrade for local use:
-```bash
-pip install easyocr
-```
+EasyOCR is included in `requirements.txt` with CPU-only PyTorch for Cloud-friendly installs.
+For local GPU acceleration, see `requirements-dev.txt`.
 
 ### Step 2: Set Up API Key
 Create a `.env` file in the `archaeological-rag-chatbot` directory:
@@ -83,6 +81,9 @@ Notes for Community Cloud:
 - The app can start without a prebuilt vector index
 - OpenCV uses the headless package for leaner deploys
 - `packages.txt` intentionally keeps a minimal Linux package list for Streamlit Cloud compatibility
+- Prefer Python 3.11 in Streamlit Cloud advanced settings when available
+- EasyOCR models download once per session; the photo organizer shows progress while scanning
+- OCR is skipped when filenames already include trench, locus, artifact type, and context
 - If `easyocr` is not installed, hotspot-based manual review still works
 
 ## 📝 Example Questions to Try

@@ -170,12 +170,21 @@ For a full interactive graph, you can export your site table to tools like Neo4j
         "upload_option_title": "Option 2: Upload photos",
         "upload_label": "Upload photos",
         "upload_help": "Select one or more photos to organise.",
-        "spinner_reading": "Reading signs and labels in photos...",
+        "spinner_reading": "Reading photos...",
+        "spinner_ocr_first_run": (
+            "Loading text-reading models for the first time. This can take about a minute, "
+            "then later photos are much faster."
+        ),
+        "progress_photo": "Photo {current} of {total}: {filename}",
         "scan_success": "Found {count} photos!",
         "upload_success": "Processed {count} photos!",
         "ocr_limited_warning": (
             "Text reading is limited on this install. Install the `easyocr` package "
             "for better reading of chalkboards and field forms."
+        ),
+        "ocr_cloud_note": (
+            "Text reading uses EasyOCR. The first photo in a session downloads models once; "
+            "after that, results are cached for the rest of the session."
         ),
         "organize_title": "Organise photos",
         "organize_label": "Sort by:",

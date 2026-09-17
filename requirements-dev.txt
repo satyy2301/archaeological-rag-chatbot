@@ -1,0 +1,4 @@
+# Optional local GPU install (not used by Streamlit Cloud).
+# Install after requirements.txt if you want CUDA-enabled torch locally:
+#   pip install -r requirements.txt
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124

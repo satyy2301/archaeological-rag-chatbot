@@ -6,7 +6,7 @@ Auto-organizes archaeological dig photos by trench/locus, artifact types, strati
 import re
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Callable
 from PIL import Image
 from PIL.ExifTags import TAGS
 import logging
@@ -34,20 +34,30 @@ class PhotoOrganizer:
         self.photos = []
         self.last_ocr_backend: Optional[str] = None
 
-    def scan_directory(self) -> List[Dict]:
+    def scan_directory(
+        self,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    ) -> List[Dict]:
         """Scan directory for photos and extract metadata."""
         if not self.photo_directory.exists():
             logger.error(f"Directory not found: {self.photo_directory}")
             return []
 
+        file_paths = [
+            file_path
+            for file_path in self.photo_directory.rglob('*')
+            if file_path.suffix.lower() in self.supported_formats
+        ]
+        total = len(file_paths)
         photos = []
-        for file_path in self.photo_directory.rglob('*'):
-            if file_path.suffix.lower() in self.supported_formats:
-                try:
-                    metadata = self._extract_metadata(file_path)
-                    photos.append(metadata)
-                except Exception as e:
-                    logger.warning(f"Error processing {file_path}: {e}")
+        for index, file_path in enumerate(file_paths, start=1):
+            if progress_callback:
+                progress_callback(index, total, file_path.name)
+            try:
+                metadata = self._extract_metadata(file_path)
+                photos.append(metadata)
+            except Exception as e:
+                logger.warning(f"Error processing {file_path}: {e}")
 
         self.photos = photos
         return photos
@@ -97,7 +107,7 @@ class PhotoOrganizer:
 
         if self.analyze_images and img is not None:
             try:
-                image_data = self._extract_image_metadata(img)
+                image_data = self._extract_image_metadata(img, existing_metadata=metadata)
                 self._merge_metadata(metadata, image_data, source=image_data.get('primary_source', 'visual'))
                 if image_data.get('ocr_backend'):
                     metadata['ocr_backend'] = image_data['ocr_backend']
@@ -130,12 +140,26 @@ class PhotoOrganizer:
             if label not in metadata['detected_labels']:
                 metadata['detected_labels'].append(label)
 
-    def _extract_image_metadata(self, image: Image.Image) -> Dict:
+    def _metadata_needs_ocr(self, metadata: Dict) -> bool:
+        """Return True when OCR may still add useful trench/locus/context details."""
+        key_fields = ('trench', 'locus', 'artifact_type', 'context_id')
+        return not all(metadata.get(field) for field in key_fields)
+
+    def _extract_image_metadata(self, image: Image.Image, existing_metadata: Optional[Dict] = None) -> Dict:
         """Extract trench/locus/artifact metadata from image content via OCR and heuristics."""
         from image_analyzer import enhance_retinex, hough_coin_detection, run_ocr
 
+        metadata = existing_metadata or {}
+        should_run_ocr = self._metadata_needs_ocr(metadata)
+
         enhanced = enhance_retinex(image)
-        ocr_payload = run_ocr(enhanced, script_profile='latin')
+        if should_run_ocr:
+            ocr_payload = run_ocr(enhanced, script_profile='latin')
+        else:
+            ocr_payload = {
+                'regions': [],
+                'backend': 'skipped',
+            }
         ocr_text = self._collect_ocr_text(ocr_payload.get('regions', []))
         parsed = self._parse_field_text(ocr_text)
 

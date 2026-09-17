@@ -100,9 +100,24 @@ class VectorStoreManager:
         split_docs = self.text_splitter.split_documents(documents)
         logger.info(f"Split into {len(split_docs)} documents")
         
-        # Create vector store
-        self.vector_store = FAISS.from_documents(split_docs, self.embeddings)
+        # Create vector store in batches to reduce memory spikes on Cloud deploys
+        batch_size = 48
         os.makedirs(self.persist_directory, exist_ok=True)
+        if len(split_docs) <= batch_size:
+            self.vector_store = FAISS.from_documents(split_docs, self.embeddings)
+        else:
+            first_batch = split_docs[:batch_size]
+            remainder = split_docs[batch_size:]
+            self.vector_store = FAISS.from_documents(first_batch, self.embeddings)
+            for start in range(0, len(remainder), batch_size):
+                batch = remainder[start:start + batch_size]
+                self.vector_store.add_documents(batch)
+                logger.info(
+                    "Indexed batch %s/%s chunks",
+                    min(start + batch_size, len(remainder)),
+                    len(remainder),
+                )
+
         self.vector_store.save_local(self.persist_directory)
         logger.info(f"FAISS vector store saved to {self.persist_directory}")
     

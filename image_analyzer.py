@@ -6,7 +6,8 @@ for archaeological artifact images.
 This module avoids destructive edits by returning enhanced copies.
 """
 
-from typing import Dict, List, Tuple, Optional
+from functools import lru_cache
+from typing import Dict, List, Tuple, Optional, Callable
 import io
 
 import numpy as np
@@ -167,6 +168,39 @@ def hough_coin_detection(image: Image.Image) -> Dict:
     return {"circles": coins}
 
 
+def is_easyocr_available() -> bool:
+    """Return True when EasyOCR can be imported."""
+    try:
+        import easyocr  # type: ignore  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def is_easyocr_initialized() -> bool:
+    """Return True when the cached EasyOCR reader has been created."""
+    return _get_easyocr_reader.cache_info().currsize > 0
+
+
+@lru_cache(maxsize=4)
+def _get_easyocr_reader(languages: tuple) -> object:
+    """Create and cache one EasyOCR reader per language set."""
+    import easyocr  # type: ignore
+
+    return easyocr.Reader(list(languages), gpu=False, verbose=False)
+
+
+def _prepare_ocr_image(image: Image.Image, max_side: int = 1280) -> Image.Image:
+    """Downscale large images before OCR to reduce memory and runtime."""
+    width, height = image.size
+    longest = max(width, height)
+    if longest <= max_side:
+        return image
+    scale = max_side / float(longest)
+    new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+    return image.resize(new_size, Image.Resampling.LANCZOS)
+
+
 def _candidate_readings(text: str, script_profile: str) -> List[str]:
     """Generate top candidate readings for damaged or noisy OCR output."""
     base = (text or "").strip()
@@ -184,14 +218,22 @@ def _candidate_readings(text: str, script_profile: str) -> List[str]:
     return ordered[:3]
 
 
-def run_ocr(image: Image.Image, script_profile: str = "auto", languages: Optional[List[str]] = None) -> Dict[str, object]:
+def run_ocr(
+    image: Image.Image,
+    script_profile: str = "auto",
+    languages: Optional[List[str]] = None,
+    on_reader_init: Optional[Callable[[], None]] = None,
+) -> Dict[str, object]:
     """Run OCR if available and return regions, backend, and review hints."""
     profile = SCRIPT_PROFILES.get(script_profile, SCRIPT_PROFILES["auto"])
     langs = languages or list(profile.get("languages", ["en"]))
     try:
-        import easyocr  # type: ignore
-        reader = easyocr.Reader(langs, gpu=False)
-        arr = np.array(image.convert("RGB"))
+        lang_key = tuple(langs)
+        if not is_easyocr_initialized() and on_reader_init:
+            on_reader_init()
+        reader = _get_easyocr_reader(lang_key)
+        ocr_image = _prepare_ocr_image(image)
+        arr = np.array(ocr_image.convert("RGB"))
         results = reader.readtext(arr)
         regions = []
         for index, (bbox, text, conf) in enumerate(results, start=1):
@@ -263,7 +305,12 @@ def to_png_bytes(img: Image.Image) -> bytes:
     return buf.getvalue()
 
 
-def analyze(image: Image.Image, script_profile: str = "auto") -> Dict:
+def analyze(
+    image: Image.Image,
+    script_profile: str = "auto",
+    force_ocr: bool = True,
+    on_reader_init: Optional[Callable[[], None]] = None,
+) -> Dict:
     """High-level analysis pipeline. Returns dict of outputs.
     - preprocessing variants
     - enhancements: CLAHE, Retinex, Sharpen
@@ -275,7 +322,19 @@ def analyze(image: Image.Image, script_profile: str = "auto") -> Dict:
     retinex = enhance_retinex(pre.get("normalized", image))
     sharp = enhance_sharpen(pre.get("normalized", image))
 
-    ocr_payload = run_ocr(retinex, script_profile=script_profile)  # OCR on retinex variant typically performs better
+    if force_ocr:
+        ocr_payload = run_ocr(
+            retinex,
+            script_profile=script_profile,
+            on_reader_init=on_reader_init,
+        )
+    else:
+        ocr_payload = {
+            "regions": [],
+            "backend": "skipped",
+            "script_profile": script_profile,
+            "notes": "OCR skipped because filename metadata was already sufficient.",
+        }
     boxed = draw_boxes(retinex, ocr_payload["regions"])
 
     coin = hough_coin_detection(image)

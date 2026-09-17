@@ -40,7 +40,7 @@ class ArtifactAssessment:
 
         # Core image analysis pipeline
         try:
-            result = analyze(image, script_profile=script_profile)
+            result = analyze(image, script_profile=script_profile, force_ocr=True)
             assessment['analysis']['dimensions'] = image.size
             assessment['analysis']['color_mode'] = image.mode
             assessment['analysis']['file_size_estimate'] = len(image.tobytes())
