@@ -3,7 +3,6 @@ RAG Chain Module
 Implements Retrieval-Augmented Generation for archaeological survey chatbot
 """
 
-import os
 from typing import List, Optional
 from langchain_openai import ChatOpenAI
 
@@ -32,6 +31,10 @@ except ImportError:
 from dotenv import load_dotenv
 import logging
 
+from config.providers import ProviderConfig
+from config.secrets import get_gemini_api_keys
+from llm.gemini_rotator import build_rotating_gemini_llm
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -43,24 +46,20 @@ class ArchaeologicalRAGChain:
     
     def __init__(self, 
                  vector_store_manager,
-                 model_name: str = "gpt-3.5-turbo",
-                 temperature: float = 0.7,
-                 use_openai: bool = True,
-                 openai_api_key: Optional[str] = None):
+                 provider: ProviderConfig,
+                 temperature: float = 0.7):
         """
         Initialize RAG chain
         
         Args:
             vector_store_manager: VectorStoreManager instance
-            model_name: LLM model name
+            provider: Active provider configuration
             temperature: Model temperature
-            use_openai: Whether to use OpenAI API (requires API key)
         """
         self.vector_store_manager = vector_store_manager
-        self.model_name = model_name
+        self.provider = provider
+        self.model_name = provider.llm_model
         self.temperature = temperature
-        self.use_openai = use_openai
-        self.openai_api_key = openai_api_key
         
         # Initialize LLM
         self.llm = self._initialize_llm()
@@ -74,30 +73,29 @@ class ArchaeologicalRAGChain:
     
     def _initialize_llm(self):
         """Initialize language model"""
-        if self.use_openai:
-            api_key = self.openai_api_key or os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                logger.warning("OPENAI_API_KEY not found. Using default model.")
-                # Fallback to a local model or raise error
-                raise ValueError("OPENAI_API_KEY not found in environment variables. "
-                               "Please set it in .env file or use a local model.")
-            
-            try:
-                # Try using ChatOpenAI from langchain_openai
-                llm = ChatOpenAI(
-                    model=self.model_name,
-                    temperature=self.temperature,
-                    openai_api_key=api_key
-                )
-                logger.info(f"Initialized OpenAI model: {self.model_name}")
-                return llm
-            except Exception as e:
-                logger.error(f"Error initializing OpenAI model: {e}")
-                raise
-        else:
-            # For local models, you can use Ollama or other local LLMs
-            logger.info("Using local model (not implemented in this version)")
-            raise NotImplementedError("Local models not implemented. Please use OpenAI.")
+        if self.provider.llm_backend == "openai":
+            if not self.provider.openai_api_key:
+                raise ValueError("OpenAI API key is required for BYOK chat.")
+            llm = ChatOpenAI(
+                model=self.provider.llm_model,
+                temperature=self.temperature,
+                openai_api_key=self.provider.openai_api_key,
+            )
+            logger.info(f"Initialized OpenAI model: {self.provider.llm_model}")
+            return llm
+
+        gemini_keys = get_gemini_api_keys()
+        if not gemini_keys:
+            raise ValueError(
+                "No Gemini API keys found. Set GEMINI_API_KEY_1/2/3 in .env or Streamlit secrets."
+            )
+        llm = build_rotating_gemini_llm(
+            api_keys=gemini_keys,
+            model_name=self.provider.llm_model,
+            temperature=self.temperature,
+        )
+        logger.info(f"Initialized hosted Gemini model: {self.provider.llm_model}")
+        return llm
     
     def _create_prompt_template(self) -> PromptTemplate:
         """Create prompt template for archaeological survey questions"""
@@ -187,4 +185,3 @@ Answer:"""
                 "metadata": doc.metadata
             })
         return sources
-

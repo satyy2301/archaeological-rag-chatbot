@@ -3,6 +3,7 @@ Vector Store Module for RAG System
 Creates and manages embeddings and vector database
 """
 
+import json
 import os
 from typing import List, Optional, Dict, Union
 import time
@@ -29,46 +30,94 @@ except ImportError:
     except ImportError:
         raise ImportError("Could not import Document. Please install langchain-core: pip install langchain-core")
 
+from config.providers import PROVIDER_META_FILENAME, ProviderConfig
+from config.secrets import get_jina_api_key
+from embeddings.jina_v3 import JinaV3Embeddings
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def _build_embeddings(provider: ProviderConfig):
+    """Create embedding client for the active provider."""
+    if provider.embedding_backend == "jina":
+        api_key = get_jina_api_key()
+        if not api_key:
+            raise ValueError(
+                "JINA_API_KEY not found. Set it in .env or Streamlit secrets for the free plan."
+            )
+        return JinaV3Embeddings(api_key=api_key, model=provider.embedding_model)
+
+    if not provider.openai_api_key:
+        raise ValueError("OpenAI API key is required for BYOK embeddings.")
+    return OpenAIEmbeddings(
+        model=provider.embedding_model,
+        openai_api_key=provider.openai_api_key,
+    )
+
+
+def _provider_meta_path(persist_directory: str) -> str:
+    return os.path.join(persist_directory, PROVIDER_META_FILENAME)
+
+
+def _write_provider_meta(persist_directory: str, provider: ProviderConfig) -> None:
+    meta = {
+        "provider": provider.embedding_backend,
+        "embedding_model": provider.embedding_model,
+        "mode": provider.mode,
+    }
+    with open(_provider_meta_path(persist_directory), "w", encoding="utf-8") as handle:
+        json.dump(meta, handle, indent=2)
+
+
+def _read_provider_meta(persist_directory: str) -> Optional[Dict[str, str]]:
+    path = _provider_meta_path(persist_directory)
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _validate_provider_meta(persist_directory: str, provider: ProviderConfig) -> None:
+    meta = _read_provider_meta(persist_directory)
+    if not meta:
+        return
+    stored_backend = meta.get("provider")
+    stored_model = meta.get("embedding_model")
+    if stored_backend != provider.embedding_backend or stored_model != provider.embedding_model:
+        raise ValueError(
+            "This document index was built with a different embedding provider. "
+            "Please upload and prepare your PDF again."
+        )
+
+
 class VectorStoreManager:
     """Manage vector store for document embeddings"""
     
     def __init__(self, 
-                 embedding_model: str = "text-embedding-3-small",
+                 provider: ProviderConfig,
                  vector_store_type: str = "faiss",
-                 persist_directory: Optional[str] = None,
-                 openai_api_key: Optional[str] = None):
+                 persist_directory: Optional[str] = None):
         """
         Initialize vector store manager
         
         Args:
-            embedding_model: OpenAI embedding model name
+            provider: Active embedding/chat provider configuration
             vector_store_type: currently only "faiss"
             persist_directory: Directory to persist vector store
-            openai_api_key: Optional OpenAI API key (falls back to OPENAI_API_KEY env var)
         """
-        self.embedding_model = embedding_model
+        self.provider = provider
+        self.embedding_model = provider.embedding_model
         self.vector_store_type = vector_store_type.lower()
         self.persist_directory = persist_directory or "./vector_store"
 
         if self.vector_store_type != "faiss":
             raise ValueError("Only the FAISS vector store is supported in this deployment build.")
-        
-        api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError(
-                "OPENAI_API_KEY not found. Please set it in .env, Streamlit secrets, "
-                "or paste your key in the sidebar."
-            )
 
         # Initialize embeddings
-        logger.info(f"Loading embedding model: {embedding_model}")
-        self.embeddings = OpenAIEmbeddings(model=embedding_model, openai_api_key=api_key)
+        logger.info(f"Loading embedding model: {provider.embedding_model} ({provider.embedding_backend})")
+        self.embeddings = _build_embeddings(provider)
         
         self.vector_store = None
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -141,6 +190,7 @@ class VectorStoreManager:
                 )
 
         self.vector_store.save_local(self.persist_directory)
+        _write_provider_meta(self.persist_directory, self.provider)
         elapsed = time.perf_counter() - started
         logger.info(
             "FAISS vector store saved to %s (%s chunks, %.2fs)",
@@ -154,6 +204,8 @@ class VectorStoreManager:
         """Load existing vector store from disk"""
         if not os.path.exists(self.persist_directory):
             raise FileNotFoundError(f"Vector store not found at {self.persist_directory}")
+
+        _validate_provider_meta(self.persist_directory, self.provider)
         
         logger.info(f"Loading vector store from {self.persist_directory}")
         
@@ -198,4 +250,3 @@ class VectorStoreManager:
         
         results = self.vector_store.similarity_search_with_score(query, k=k)
         return results
-

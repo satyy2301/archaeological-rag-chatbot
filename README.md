@@ -10,7 +10,8 @@ LIVE LINK : https://archyrag.streamlit.app/
 - 💬 **Interactive Chat**: Streamlit-based web interface for easy interaction
 - 🧠 **RAG Architecture**: Combines retrieval and generation for accurate, context-aware answers
 - 📚 **Source Citation**: Shows source documents for transparency
-- 🔑 **Bring Your Own OpenAI Key**: Paste an OpenAI API key in the sidebar (kept only for the current browser session)
+- 🆓 **Free Plan**: Works out of the box with hosted Jina embeddings and Gemini chat (session limits apply)
+- 🔑 **Bring Your Own OpenAI Key**: Optional sidebar key for unlimited use (kept only for the current browser session)
 - 🖼️ **Artifact Image Analysis**: Upload photos of inscriptions/coins/manuscripts for non-destructive enhancement (denoise, shadow removal, CLAHE, Retinex, sharpening), OCR with bounding boxes and confidence, region zoom, and feedback-saving for future improvements
 - 🌐 **Similar Finds Lookup**: Searches lightweight public collection APIs for comparable objects without bundling bulky local reference datasets
 
@@ -50,13 +51,16 @@ LIVE LINK : https://archyrag.streamlit.app/
    pip install -r requirements.txt
    ```
 
-4. **Set up environment variables:**
+4. **Set up environment variables (for local dev / deployment owner):**
    - Create a `.env` file in the `archaeological-rag-chatbot` directory
-   - Add your OpenAI API key:
+   - Add hosted free-tier keys:
      ```
-     OPENAI_API_KEY=your_api_key_here
+     JINA_API_KEY=jina_...
+     GEMINI_API_KEY_1=AIza...
+     GEMINI_API_KEY_2=AIza...
+     GEMINI_API_KEY_3=AIza...
      ```
-   - Get your API key from [OpenAI Platform](https://platform.openai.com/api-keys)
+   - Visitors can optionally paste their own OpenAI key in the sidebar for unlimited use
 
 5. **Optional: Pre-process the PDF (recommended for faster startup):**
    ```bash
@@ -85,7 +89,7 @@ LIVE LINK : https://archyrag.streamlit.app/
    - Once processed, you can ask questions about archaeological surveys
    - The chatbot will provide answers based on the PDF content
    - View source citations to see where the information came from
-   - Paste your OpenAI API key in the sidebar under **OpenAI API Key**
+   - Optional: open **Use my own OpenAI API key** in the sidebar for unlimited use
 
 ### Image Analysis (Found Something?)
 - Open the "Found Something?" tab
@@ -111,8 +115,11 @@ LIVE LINK : https://archyrag.streamlit.app/
 archaeological-rag-chatbot/
 ├── app.py                 # Streamlit web application
 ├── pdf_processor.py       # PDF text extraction and chunking
-├── vector_store.py        # OpenAI embeddings and FAISS storage
-├── rag_chain.py          # RAG chain implementation
+├── vector_store.py        # Provider-aware embeddings and FAISS storage
+├── rag_chain.py          # RAG chain implementation (Gemini hosted or OpenAI BYOK)
+├── config/               # Provider, secrets, and rate-limit helpers
+├── embeddings/           # Jina v3 embedding integration
+├── llm/                  # Gemini key-rotation helper
 ├── requirements.txt      # Python dependencies
 ├── .env.example         # Environment variables template
 ├── README.md            # This file
@@ -124,12 +131,12 @@ archaeological-rag-chatbot/
 ## How It Works
 
 1. **PDF Processing**: The PDF is processed to extract text, which is then split into manageable chunks
-2. **Embedding Creation**: Text chunks are converted to vector embeddings using OpenAI embeddings
+2. **Embedding Creation**: Text chunks are converted to vector embeddings using Jina (free plan) or OpenAI (BYOK)
 3. **Vector Store**: Embeddings are stored in a FAISS vector database for fast similarity search
 4. **Query Processing**: When you ask a question:
    - The question is converted to an embedding
    - Similar document chunks are retrieved from the vector store
-   - The retrieved context is passed to an LLM (GPT-3.5-turbo) along with your question
+   - The retrieved context is passed to Gemini (free plan) or GPT-3.5-turbo (BYOK) along with your question
    - The LLM generates an answer based on the retrieved context
 
 ## Example Questions
@@ -145,8 +152,8 @@ archaeological-rag-chatbot/
 You can modify the following in the code:
 
 - **Chunk Size**: Adjust `chunk_size` in `pdf_processor.py` (default: 1000 characters)
-- **Embedding Model**: Change `embedding_model` in `vector_store.py` (default: "text-embedding-3-small")
-- **LLM Model**: Modify `model_name` in `rag_chain.py` (default: "gpt-3.5-turbo")
+- **Embedding Model**: See `config/providers.py` (Jina `jina-embeddings-v3` or OpenAI `text-embedding-3-small`)
+- **LLM Model**: See `config/providers.py` (Gemini `gemini-3.6-flash` or OpenAI `gpt-3.5-turbo`)
 - **Temperature**: Adjust `temperature` for more/less creative responses (default: 0.7)
 
 ## Public Deployment (Fastest and Easiest)
@@ -182,20 +189,20 @@ For Streamlit Community Cloud, keep `packages.txt` minimal. Avoid pinning distro
 - The `vector_store/` folder is ephemeral on Cloud; upload and index your PDF each session unless you add external storage.
 - For local GPU development, see `requirements-dev.txt` for optional CUDA torch install notes.
 
-### API Key Entry
-- The app supports session-level key entry in the sidebar.
-- Enter a key with **Apply key**.
-- The key is not stored in `user_data` files or repository.
-
-### Optional Owner Key Fallback
-If you want the app to also work without manually entered keys, set a default secret in Streamlit Cloud:
-- In app settings > **Secrets**, add:
+### Hosted API Keys (Server-Side)
+Set these in Streamlit Cloud **Secrets** (or local `.env`) so visitors can use the free plan without pasting keys:
 
 ```toml
-OPENAI_API_KEY = "sk-..."
+JINA_API_KEY = "jina_..."
+GEMINI_API_KEY_1 = "AIza..."
+GEMINI_API_KEY_2 = "AIza..."
+GEMINI_API_KEY_3 = "AIza..."
 ```
 
-This acts as a fallback when a visitor does not provide a key.
+### Optional BYOK (User OpenAI Key)
+- Users can open **Use my own OpenAI API key** in the sidebar.
+- Enter a key with **Apply key**.
+- The key is not stored in `user_data` files or repository.
 
 Optional lookup secret:
 
@@ -207,10 +214,10 @@ Without this key, the app still uses public sources that do not require authenti
 
 ## Troubleshooting
 
-### "OPENAI_API_KEY not found"
-- For local development, make sure you've created a `.env` file with your OpenAI API key.
-- For public usage, you can paste a key in the sidebar under **OpenAI API Key**.
-- On Streamlit Cloud, you can also set `OPENAI_API_KEY` in app secrets as fallback.
+### "Hosted AI keys are not configured"
+- For local development, set `JINA_API_KEY` and `GEMINI_API_KEY_1/2/3` in `.env`.
+- On Streamlit Cloud, add the same keys in app **Secrets**.
+- Users can also paste their own OpenAI key under **Use my own OpenAI API key**.
 
 ### PDF Processing Errors
 - Try a different PDF if the current one fails to process

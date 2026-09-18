@@ -2,8 +2,12 @@
 
 COPY = {
     "sidebar": {
-        "api_key_header": "OpenAI API Key",
-        "api_key_caption": "Paste your OpenAI API key for this browser session.",
+        "free_plan_header": "Free plan",
+        "free_plan_quota": "{remaining}/{total} questions left this session",
+        "byok_plan_header": "Your API key",
+        "byok_plan_caption": "Unlimited use with your OpenAI key.",
+        "byok_expander": "Use my own OpenAI API key",
+        "api_key_caption": "Optional. Paste your OpenAI API key for unlimited use.",
         "api_key_label": "Your OpenAI API Key",
         "api_key_placeholder": "sk-...",
         "api_key_help": "Your key stays in this session only. It is cleared when you click Clear key or close the browser.",
@@ -14,7 +18,6 @@ COPY = {
         "assistant_mode_header": "Assistant Mode",
         "assistant_mode_label": "What are you working on?",
         "assistant_mode_help": "Pick a focus area so answers match your task.",
-        "api_key_tip": "Tip: Paste your API key above. For local use, you can also add it to a `.env` file.",
         "quick_starter_header": "Quick Starter Questions",
     },
     "chat": {
@@ -27,10 +30,6 @@ COPY = {
             "and ask questions in plain English. No technical knowledge needed."
         ),
         "step1_title": "Step 1 — Upload your document",
-        "api_key_warning": (
-            "Add your OpenAI API key first — paste it in the sidebar on the left, "
-            "then upload your document here."
-        ),
         "pdf_uploader_label": "Choose a PDF file (up to 200 MB)",
         "pdf_uploader_help": "Your file is only used in this session. It is not stored permanently.",
         "pdf_ready": "is ready to process",
@@ -49,10 +48,11 @@ Once your document is ready, try asking:
 - *"What permits or laws are discussed?"*
 - *"Explain soil layers in simple terms."*
 """,
-        "api_key_help_title": "Need an API key?",
-        "api_key_help_body": (
-            "Get one at [platform.openai.com](https://platform.openai.com) "
-            "→ paste it in the **OpenAI API Key** field in the sidebar."
+        "byok_help_title": "Want unlimited use?",
+        "byok_help_body": (
+            "The free plan works out of the box. For higher limits, open "
+            "**Use my own OpenAI API key** in the sidebar and paste a key from "
+            "[platform.openai.com](https://platform.openai.com)."
         ),
     },
     "maps": {
@@ -268,6 +268,10 @@ For a full interactive graph, you can export your site table to tools like Neo4j
         "document_read_sections": "Document read — found {count} sections of text.",
         "document_prepared": "Document prepared successfully!",
         "setting_up_assistant": "Setting up your assistant...",
+        "reindexing_for_provider": "Re-indexing your document for the new plan...",
+        "provider_switch_reindexing": "Re-indexing your document for {plan}...",
+        "provider_switch_reindex_done_byok": "Document re-indexed with your OpenAI key. Continue chatting.",
+        "provider_switch_reindex_done_free": "Switched back to free plan. Document re-indexed.",
         "auto_extracted": "Found in your PDF: {summary}",
         "pdf_ready_named": "**{name}** is ready to process",
     },
@@ -275,8 +279,28 @@ For a full interactive graph, you can export your site table to tools like Neo4j
         "no_document_indexed": "No document is ready yet. Please upload and prepare a PDF first.",
         "assistant_init": "Could not start the assistant: {error}",
         "api_key_invalid": (
-            "Please add a valid OpenAI API key in the sidebar. "
-            "For local use, you can also add it to a `.env` file."
+            "Please add a valid OpenAI API key in the sidebar under "
+            "**Use my own OpenAI API key**."
+        ),
+        "hosted_keys_missing": (
+            "Hosted AI keys are not configured on the server. "
+            "Set JINA_API_KEY and GEMINI_API_KEY_1/2/3 in deployment secrets, "
+            "or add your own OpenAI API key in the sidebar."
+        ),
+        "hosted_chat_limit": (
+            "Free plan limit reached for this session (20 questions). "
+            "Add your OpenAI API key in the sidebar for unlimited use."
+        ),
+        "hosted_index_limit": (
+            "Free plan allows one document index per session. "
+            "Add your OpenAI API key in the sidebar for unlimited use."
+        ),
+        "hosted_page_limit": (
+            "Free plan supports PDFs up to {max_pages} pages. "
+            "Add your OpenAI API key in the sidebar for larger documents."
+        ),
+        "provider_switch_no_cache": (
+            "Cannot switch provider without re-uploading. Please upload your PDF again."
         ),
         "no_pdf_text": "No text could be read from this PDF. Try a different file or a text-based PDF.",
         "pdf_processing": "Could not prepare this PDF: {error}",

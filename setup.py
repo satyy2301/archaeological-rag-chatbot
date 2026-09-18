@@ -49,10 +49,13 @@ def setup_vector_store(pdf_path: str):
     
     # Create vector store
     logger.info("Step 2: Creating vector embeddings...")
+    from config.providers import resolve_provider
+
+    provider = resolve_provider(None)
     vector_store_manager = VectorStoreManager(
-        embedding_model="text-embedding-3-small",
+        provider=provider,
         vector_store_type="faiss",
-        persist_directory="./vector_store"
+        persist_directory="./vector_store",
     )
     chunk_count = vector_store_manager.create_vector_store(full_text)
     logger.info(f"✓ Vector store created successfully with {chunk_count} chunks!")
@@ -95,7 +98,7 @@ def main():
         print("=" * 60)
         print()
         print("Next steps:")
-        print("1. Make sure you have set OPENAI_API_KEY in your .env file")
+        print("1. Make sure JINA_API_KEY and GEMINI_API_KEY_1/2/3 are set in your .env file")
         print("2. Run: streamlit run app.py")
         print("3. Open the app in your browser")
     else:

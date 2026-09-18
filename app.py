@@ -16,6 +16,19 @@ from dotenv import load_dotenv
 from pdf_processor import PDFProcessor
 from rag_chain import ArchaeologicalRAGChain
 from vector_store import VectorStoreManager
+from config.providers import ProviderConfig, resolve_provider
+from config.secrets import get_user_openai_key, hosted_keys_available
+from config.rate_limits import (
+    HOSTED_MAX_CHAT,
+    HOSTED_MAX_PAGES,
+    can_chat,
+    can_index,
+    check_page_limit,
+    init_rate_limit_state,
+    record_chat,
+    record_index,
+    remaining_chat,
+)
 from photo_organizer import PhotoOrganizer
 from artifact_assessment import ArtifactAssessment
 from report_generator import ReportGenerator
@@ -114,44 +127,141 @@ def initialize_session_state():
         st.session_state.artifact_assessor = None
     if 'user_openai_api_key' not in st.session_state:
         st.session_state.user_openai_api_key = ""
+    if 'embedding_provider_used' not in st.session_state:
+        st.session_state.embedding_provider_used = None
+    if 'cached_document_text' not in st.session_state:
+        st.session_state.cached_document_text = None
+    if 'cached_document_page_count' not in st.session_state:
+        st.session_state.cached_document_page_count = None
+    init_rate_limit_state(st.session_state)
 
 
-def _get_openai_api_key() -> Optional[str]:
-    """Resolve OpenAI API key from session state or environment."""
-    session_key = st.session_state.get("user_openai_api_key", "").strip()
-    if session_key:
-        return session_key
-    env_key = os.getenv("OPENAI_API_KEY", "").strip()
-    return env_key or None
+def _get_user_openai_key() -> Optional[str]:
+    """Resolve BYOK OpenAI key from sidebar session only."""
+    return get_user_openai_key(st.session_state.get("user_openai_api_key", ""))
 
 
-def _initialize_rag_chain_with_current_key() -> bool:
-    """Initialize or refresh the RAG chain using a user key (if provided) or .env key."""
+def _get_provider():
+    """Resolve active provider configuration for this session."""
+    return resolve_provider(_get_user_openai_key())
+
+
+def _initialize_rag_chain_with_current_provider() -> bool:
+    """Initialize or refresh the RAG chain for the active provider."""
     if not st.session_state.vector_store_manager:
         st.error(COPY["errors"]["no_document_indexed"])
         return False
 
-    api_key = _get_openai_api_key()
+    provider = _get_provider()
+    if provider.mode == "hosted" and not hosted_keys_available():
+        st.error(COPY["errors"]["hosted_keys_missing"])
+        return False
+
     try:
         rag_chain = ArchaeologicalRAGChain(
             vector_store_manager=st.session_state.vector_store_manager,
-            model_name="gpt-3.5-turbo",
+            provider=provider,
             temperature=0.7,
-            openai_api_key=api_key,
         )
         st.session_state.rag_chain = rag_chain
+        st.session_state.provider_mode = provider.mode
         st.success(f"✅ {COPY['status']['assistant_ready']}")
         return True
     except Exception as e:
         st.session_state.rag_chain = None
         st.error(COPY["errors"]["assistant_init"].format(error=str(e)))
-        st.info(COPY["errors"]["api_key_invalid"])
+        if provider.mode == "byok":
+            st.info(COPY["errors"]["api_key_invalid"])
         return False
+
+
+def _index_document_text(
+    full_text: str,
+    page_count: int,
+    provider: ProviderConfig,
+    *,
+    is_provider_switch: bool = False,
+) -> tuple[bool, int]:
+    """Index extracted text and initialize the RAG chain for the given provider."""
+    chunk_count = 0
+    try:
+        if provider.mode == "hosted" and not hosted_keys_available():
+            st.error(COPY["errors"]["hosted_keys_missing"])
+            return False, 0
+        if not is_provider_switch and not can_index(st.session_state, provider):
+            st.warning(COPY["errors"]["hosted_index_limit"])
+            return False, 0
+        if not check_page_limit(page_count, provider):
+            st.warning(
+                COPY["errors"]["hosted_page_limit"].format(max_pages=HOSTED_MAX_PAGES)
+            )
+            return False, 0
+
+        spinner_label = (
+            COPY["status"]["reindexing_for_provider"]
+            if is_provider_switch
+            else COPY["status"]["indexing_document"]
+        )
+        with st.spinner(f"🗂️ {spinner_label}"):
+            index_started = time.perf_counter()
+            vector_store_manager = VectorStoreManager(
+                provider=provider,
+                vector_store_type="faiss",
+                persist_directory="./vector_store",
+            )
+            chunk_count = vector_store_manager.create_vector_store(full_text)
+            index_elapsed = time.perf_counter() - index_started
+            logger.info("PDF index: %s chunks, %.2fs", chunk_count, index_elapsed)
+            st.session_state.vector_store_manager = vector_store_manager
+            st.session_state.vector_store_initialized = True
+            st.session_state.embedding_provider_used = provider.embedding_backend
+            if not is_provider_switch:
+                record_index(st.session_state, provider)
+
+        if not is_provider_switch:
+            st.success(f"✅ {COPY['status']['document_prepared']}")
+
+        with st.spinner(f"🤖 {COPY['status']['setting_up_assistant']}"):
+            if not _initialize_rag_chain_with_current_provider():
+                return False, chunk_count
+        return True, chunk_count
+    except Exception as e:
+        st.error(COPY["errors"]["pdf_processing"].format(error=str(e)))
+        return False, chunk_count
+
+
+def _reindex_for_provider_switch(target_provider: ProviderConfig) -> bool:
+    """Re-index cached document text when switching between hosted and BYOK."""
+    cached_text = st.session_state.get("cached_document_text")
+    if not cached_text or not str(cached_text).strip():
+        st.error(COPY["errors"]["provider_switch_no_cache"])
+        return False
+
+    page_count = st.session_state.get("cached_document_page_count") or 0
+    plan_label = (
+        COPY["sidebar"]["byok_plan_header"]
+        if target_provider.mode == "byok"
+        else COPY["sidebar"]["free_plan_header"]
+    )
+    st.info(COPY["status"]["provider_switch_reindexing"].format(plan=plan_label))
+    success, _ = _index_document_text(
+        cached_text,
+        page_count,
+        target_provider,
+        is_provider_switch=True,
+    )
+    if success:
+        if target_provider.mode == "byok":
+            st.success(f"✅ {COPY['status']['provider_switch_reindex_done_byok']}")
+        else:
+            st.success(f"✅ {COPY['status']['provider_switch_reindex_done_free']}")
+    return success
 
 
 def process_pdf_and_create_vector_store(pdf_path: str):
     """Process PDF and create vector store."""
     try:
+        provider = _get_provider()
         pipeline_started = time.perf_counter()
         processor = PDFProcessor(pdf_path)
 
@@ -174,23 +284,17 @@ def process_pdf_and_create_vector_store(pdf_path: str):
                 f"✅ {COPY['status']['document_read_sections'].format(count=processor.page_count or 1)}"
             )
 
-        with st.spinner(f"🗂️ {COPY['status']['indexing_document']}"):
-            index_started = time.perf_counter()
-            vector_store_manager = VectorStoreManager(
-                embedding_model="text-embedding-3-small",
-                vector_store_type="faiss",
-                persist_directory="./vector_store",
-                openai_api_key=_get_openai_api_key(),
-            )
-            chunk_count = vector_store_manager.create_vector_store(full_text)
-            index_elapsed = time.perf_counter() - index_started
-            logger.info("PDF index: %s chunks, %.2fs", chunk_count, index_elapsed)
-            st.session_state.vector_store_manager = vector_store_manager
-            st.session_state.vector_store_initialized = True
-            st.success(f"✅ {COPY['status']['document_prepared']}")
+        st.session_state.cached_document_text = full_text
+        st.session_state.cached_document_page_count = processor.page_count
 
-        with st.spinner(f"🤖 {COPY['status']['setting_up_assistant']}"):
-            _initialize_rag_chain_with_current_key()
+        success, chunk_count = _index_document_text(
+            full_text,
+            processor.page_count,
+            provider,
+            is_provider_switch=False,
+        )
+        if not success:
+            return False
 
         try:
             map_started = time.perf_counter()
@@ -238,19 +342,23 @@ def process_pdf_and_create_vector_store(pdf_path: str):
 def load_existing_vector_store():
     """Load existing vector store if available"""
     try:
+        provider = _get_provider()
         vector_store_manager = VectorStoreManager(
-            embedding_model="text-embedding-3-small",
+            provider=provider,
             vector_store_type="faiss",
             persist_directory="./vector_store",
-            openai_api_key=_get_openai_api_key(),
         )
         vector_store_manager.load_vector_store()
         st.session_state.vector_store_manager = vector_store_manager
         st.session_state.vector_store_initialized = True
+        st.session_state.embedding_provider_used = provider.embedding_backend
         
         # Initialize RAG chain (best effort)
-        _initialize_rag_chain_with_current_key()
+        _initialize_rag_chain_with_current_provider()
         return True
+    except ValueError as e:
+        st.error(str(e))
+        return False
     except Exception as e:
         logger.info(f"Could not load existing vector store: {e}")
         return False
@@ -284,30 +392,61 @@ def _build_mode_preface(mode: str) -> str:
 
 
 def _render_sidebar():
-    """Sidebar: API key, document status, and quick tools."""
+    """Sidebar: plan status, optional BYOK key, document status, and quick tools."""
     with st.sidebar:
-        st.header(f"🔑 {COPY['sidebar']['api_key_header']}")
-        st.caption(COPY["sidebar"]["api_key_caption"])
-        entered_key = st.text_input(
-            COPY["sidebar"]["api_key_label"],
-            type="password",
-            value=st.session_state.user_openai_api_key,
-            placeholder=COPY["sidebar"]["api_key_placeholder"],
-            help=COPY["sidebar"]["api_key_help"],
-        )
-        st.session_state.user_openai_api_key = entered_key
+        provider = _get_provider()
+        if provider.mode == "hosted":
+            remaining = remaining_chat(st.session_state, provider)
+            st.header(COPY["sidebar"]["free_plan_header"])
+            st.caption(
+                COPY["sidebar"]["free_plan_quota"].format(
+                    remaining=remaining,
+                    total=HOSTED_MAX_CHAT,
+                )
+            )
+            if not hosted_keys_available():
+                st.warning(COPY["errors"]["hosted_keys_missing"])
+        else:
+            st.header(COPY["sidebar"]["byok_plan_header"])
+            st.caption(COPY["sidebar"]["byok_plan_caption"])
 
-        col_key1, col_key2 = st.columns(2)
-        with col_key1:
-            if st.button("Apply key", width="stretch"):
-                if st.session_state.vector_store_initialized and st.session_state.vector_store_manager:
-                    _initialize_rag_chain_with_current_key()
-                else:
-                    st.success(COPY["sidebar"]["apply_key_saved"])
-        with col_key2:
-            if st.button("Clear key", width="stretch"):
-                st.session_state.user_openai_api_key = ""
-                st.info(COPY["sidebar"]["clear_key_info"])
+        with st.expander(COPY["sidebar"]["byok_expander"], expanded=False):
+            st.caption(COPY["sidebar"]["api_key_caption"])
+            entered_key = st.text_input(
+                COPY["sidebar"]["api_key_label"],
+                type="password",
+                value=st.session_state.user_openai_api_key,
+                placeholder=COPY["sidebar"]["api_key_placeholder"],
+                help=COPY["sidebar"]["api_key_help"],
+            )
+            st.session_state.user_openai_api_key = entered_key
+
+            col_key1, col_key2 = st.columns(2)
+            with col_key1:
+                if st.button("Apply key", width="stretch"):
+                    new_provider = _get_provider()
+                    if not _get_user_openai_key():
+                        st.success(COPY["sidebar"]["apply_key_saved"])
+                    elif (
+                        st.session_state.vector_store_initialized
+                        and st.session_state.embedding_provider_used
+                        and st.session_state.embedding_provider_used != new_provider.embedding_backend
+                    ):
+                        _reindex_for_provider_switch(new_provider)
+                    elif st.session_state.vector_store_initialized and st.session_state.vector_store_manager:
+                        _initialize_rag_chain_with_current_provider()
+                    else:
+                        st.success(COPY["sidebar"]["apply_key_saved"])
+            with col_key2:
+                if st.button("Clear key", width="stretch"):
+                    was_byok_index = st.session_state.embedding_provider_used == "openai"
+                    st.session_state.user_openai_api_key = ""
+                    if st.session_state.vector_store_initialized and was_byok_index:
+                        hosted_provider = resolve_provider(None)
+                        if not _reindex_for_provider_switch(hosted_provider):
+                            st.session_state.rag_chain = None
+                    else:
+                        st.info(COPY["sidebar"]["clear_key_info"])
 
         st.markdown("---")
         # Show current document name if one is loaded
@@ -320,6 +459,9 @@ def _render_sidebar():
                 st.session_state.rag_chain = None
                 st.session_state.vector_store_manager = None
                 st.session_state.uploaded_pdf_name = None
+                st.session_state.cached_document_text = None
+                st.session_state.cached_document_page_count = None
+                st.session_state.embedding_provider_used = None
                 st.session_state.messages = []
                 st.rerun()
             st.markdown("---")
@@ -338,8 +480,6 @@ def _render_sidebar():
             help=COPY["sidebar"]["assistant_mode_help"],
         )
         st.session_state.active_mode = mode
-
-        st.caption(f"💡 {COPY['sidebar']['api_key_tip']}")
 
         st.markdown("---")
         st.subheader(COPY["sidebar"]["quick_starter_header"])
@@ -401,6 +541,11 @@ def _render_chat_tab():
         # Chat input
         placeholder = "Ask a question about archaeological surveys, sites, or regulations..."
         if prompt := st.chat_input(placeholder):
+            provider = _get_provider()
+            if not can_chat(st.session_state, provider):
+                st.warning(COPY["errors"]["hosted_chat_limit"])
+                return
+
             # Apply specialized mode preface
             preface = _build_mode_preface(st.session_state.active_mode)
             full_prompt = f"{preface} User question: {prompt}" if preface else prompt
@@ -418,6 +563,7 @@ def _render_chat_tab():
                     sources = st.session_state.rag_chain.get_sources(
                         result["source_documents"]
                     )
+                    record_chat(st.session_state, provider)
                     
                     st.markdown(answer)
                     
@@ -459,10 +605,9 @@ def _render_chat_tab():
         with col_upload:
             st.markdown(f"### 📄 {COPY['chat']['step1_title']}")
 
-            # Warn if no API key yet
-            api_key_ok = bool(_get_openai_api_key())
-            if not api_key_ok:
-                st.warning(f"⚠️ **{COPY['chat']['api_key_warning']}**")
+            provider = _get_provider()
+            if provider.mode == "hosted" and not hosted_keys_available():
+                st.warning(f"⚠️ **{COPY['errors']['hosted_keys_missing']}**")
 
             pdf_file = st.file_uploader(
                 COPY["chat"]["pdf_uploader_label"],
@@ -479,11 +624,12 @@ def _render_chat_tab():
                 st.success(
                     f"✅ {COPY['status']['pdf_ready_named'].format(name=pdf_file.name)}"
                 )
+                can_process = provider.mode == "byok" or hosted_keys_available()
                 if st.button(
                     f"⚙️ {COPY['chat']['process_button']}",
                     width="stretch",
                     key="main_process_btn",
-                    disabled=not api_key_ok,
+                    disabled=not can_process,
                 ):
                     success = process_pdf_and_create_vector_store(pdf_path)
                     if success:
@@ -509,8 +655,8 @@ def _render_chat_tab():
         with col_help:
             st.markdown(f"### 💡 {COPY['chat']['what_can_i_ask_title']}")
             st.markdown(COPY["chat"]["what_can_i_ask_body"])
-            st.markdown(f"### 🔑 {COPY['chat']['api_key_help_title']}")
-            st.markdown(COPY["chat"]["api_key_help_body"])
+            st.markdown(f"### 🔑 {COPY['chat']['byok_help_title']}")
+            st.markdown(COPY["chat"]["byok_help_body"])
 
 
 def _render_visualisations_tab():
